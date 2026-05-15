@@ -1,9 +1,12 @@
 node_modules
 .next
+**/.next
 dist
+**/dist
 coverage
 .env
 .env.*
 !.env.example
 pnpm-lock.yaml
 *.log
+*.tsbuildinfo

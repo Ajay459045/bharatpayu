@@ -138,13 +138,24 @@ const sidebar: Array<{
       href:
         label === "Pending Approvals"
           ? "/dashboard/admin/approvals"
-          : undefined,
+          : [
+                "All Retailers",
+                "Active Retailers",
+                "Suspended Retailers",
+              ].includes(label)
+            ? "/dashboard/admin/users"
+            : undefined,
     })),
   },
   {
     section: "Distributors",
     items: ["All Distributors", "Earnings", "Wallet Management"].map(
-      (label) => ({ label, Icon: Building2 }),
+      (label) => ({
+        label,
+        Icon: Building2,
+        href:
+          label === "All Distributors" ? "/dashboard/admin/users" : undefined,
+      }),
     ),
   },
   {
@@ -381,14 +392,12 @@ function withDemoFloor(input: AdminOverview): AdminOverview {
       { name: "Pending", value: 3928, color: "#f59e0b" },
       { name: "Failed", value: 1404, color: "#ef4444" },
     ],
-    growth: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"].map(
-      (month, index) => ({
-        month,
-        retailers: Math.round((12840 / 6) * (index + 1)),
-        distributors: Math.round((486 / 6) * (index + 1)),
-        earnings: Math.round(28476000 * (0.35 + index * 0.13)),
-      }),
-    ),
+    growth: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"].map((month, index) => ({
+      month,
+      retailers: Math.round((12840 / 6) * (index + 1)),
+      distributors: Math.round((486 / 6) * (index + 1)),
+      earnings: Math.round(28476000 * (0.35 + index * 0.13)),
+    })),
     transactions:
       input.transactions.length >= demoTransactions.length
         ? input.transactions
@@ -433,7 +442,8 @@ function withDemoFloor(input: AdminOverview): AdminOverview {
           },
           {
             title: "DigiSeva category sync ready",
-            detail: "Electricity, water, insurance, piped gas and LPG flows available",
+            detail:
+              "Electricity, water, insurance, piped gas and LPG flows available",
             time: "5 minutes ago",
             tone: "blue",
           },
@@ -769,8 +779,8 @@ export function AdminDashboard() {
               </h1>
               <p className="mt-3 max-w-3xl text-slate-300">
                 Founded in 2021. Monitor revenue, transactions, approvals,
-                wallet risk, commission, reports, security events and API
-                health from one premium operations console.
+                wallet risk, commission, reports, security events and API health
+                from one premium operations console.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2 sm:flex">

@@ -89,7 +89,7 @@ export default function AdminApprovalsPage() {
           <p className="text-sm uppercase tracking-[0.18em] text-blue-300">
             Admin control
           </p>
-          <h1 className="text-3xl font-bold">Retailer approval requests</h1>
+          <h1 className="text-3xl font-bold">User approval requests</h1>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button variant="secondary" onClick={loadApprovals}>
               Refresh Requests
@@ -137,7 +137,12 @@ export default function AdminApprovalsPage() {
                 <h2 className="mt-4 text-2xl font-bold">{request.fullName}</h2>
                 <p className="text-slate-300">{request.businessName}</p>
                 <div className="mt-5 grid gap-2 text-sm text-slate-300">
-                  <p>Retailer ID: {request.retailerCode ?? "-"}</p>
+                  <p>
+                    {request.role === "distributor"
+                      ? "Distributor"
+                      : "Retailer"}{" "}
+                    ID: {request.retailerCode ?? "-"}
+                  </p>
                   <p>Mobile: {request.mobile}</p>
                   <p>Email: {request.email}</p>
                   <p>State: {request.address.state}</p>
@@ -209,7 +214,10 @@ export default function AdminApprovalsPage() {
                   />
                   <div className="flex flex-wrap gap-2">
                     <Button onClick={() => action(request.id, "approved")}>
-                      <CheckCircle2 size={16} /> Approve Retailer
+                      <CheckCircle2 size={16} /> Approve{" "}
+                      {request.role === "distributor"
+                        ? "Distributor"
+                        : "Retailer"}
                     </Button>
                     <Button
                       variant="danger"

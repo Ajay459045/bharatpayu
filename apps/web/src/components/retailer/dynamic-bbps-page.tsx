@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Search, WalletCards, Zap } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
@@ -11,31 +11,29 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 
-const serviceCategories: Record<
-  string,
-  { title: string; aliases: string[] }
-> = {
-  electricity: {
-    title: "Electricity Bill Payment",
-    aliases: ["electricity"],
-  },
-  water: {
-    title: "Water Bill Payment",
-    aliases: ["water"],
-  },
-  insurance: {
-    title: "Insurance Premium Payment",
-    aliases: ["insurance", "life insurance", "health insurance"],
-  },
-  gas: {
-    title: "Piped Gas Bill Payment",
-    aliases: ["piped gas", "png"],
-  },
-  lpg: {
-    title: "LPG Gas Payment",
-    aliases: ["lpg gas", "lpg"],
-  },
-};
+const serviceCategories: Record<string, { title: string; aliases: string[] }> =
+  {
+    electricity: {
+      title: "Electricity Bill Payment",
+      aliases: ["electricity"],
+    },
+    water: {
+      title: "Water Bill Payment",
+      aliases: ["water"],
+    },
+    insurance: {
+      title: "Insurance Premium Payment",
+      aliases: ["insurance", "life insurance", "health insurance"],
+    },
+    gas: {
+      title: "Piped Gas Bill Payment",
+      aliases: ["piped gas", "png"],
+    },
+    lpg: {
+      title: "LPG Gas Payment",
+      aliases: ["lpg gas", "lpg"],
+    },
+  };
 
 export function DynamicBbpsPage({
   initialCategoryKey = "",
@@ -46,7 +44,7 @@ export function DynamicBbpsPage({
 }) {
   const [categoryKey, setCategoryKey] = useState(initialCategoryKey);
   const [billerId, setBillerId] = useState("");
-  const [inputs, setInputs] = useState<Record<string, string>>({});
+  const [consumerNumber, setConsumerNumber] = useState("");
   const [bill, setBill] = useState<any>(null);
   const [receipt, setReceipt] = useState<any>(null);
   const [status, setStatus] = useState("");
@@ -59,12 +57,14 @@ export function DynamicBbpsPage({
   const categories = categoryData?.categories ?? [];
   const requestedService = serviceKey ? serviceCategories[serviceKey] : null;
   const allowedCategories = requestedService
-    ? categories.filter((category: any) =>
-        requestedService.aliases.some((alias) =>
-          String(category.categoryName ?? "")
-            .toLowerCase()
-            .includes(alias),
-        ),
+    ? categories.filter(
+        (category: any) =>
+          category.serviceKey === serviceKey ||
+          requestedService.aliases.some((alias) =>
+            String(category.categoryName ?? "")
+              .toLowerCase()
+              .includes(alias),
+          ),
       )
     : categories;
   const selectedCategory =
@@ -78,6 +78,7 @@ export function DynamicBbpsPage({
     if (nextCategoryKey && nextCategoryKey !== categoryKey) {
       setCategoryKey(nextCategoryKey);
       setBillerId("");
+      setConsumerNumber("");
     }
   }, [allowedCategories, categoryKey, selectedCategory?.categoryKey]);
 
@@ -96,34 +97,17 @@ export function DynamicBbpsPage({
       setBillerId(billers[0].billerId);
   }, [billers, billerId]);
 
-  const { data: detailData } = useQuery({
-    queryKey: ["bbps-biller-details", billerId],
-    queryFn: async () =>
-      (await api.get("/bbps/biller-details", { params: { billerId } })).data,
-    enabled: Boolean(billerId),
-  });
-  const parameters = useMemo(
-    () => detailData?.details?.parameters ?? [],
-    [detailData],
-  );
-
   useEffect(() => {
-    const next: Record<string, string> = {};
-    for (const parameter of parameters)
-      next[parameter.name] = inputs[parameter.name] ?? "";
-    setInputs(next);
+    setConsumerNumber("");
     setBill(null);
     setReceipt(null);
-  }, [parameters]);
+  }, [billerId, categoryKey]);
 
   function validate() {
-    for (const parameter of parameters) {
-      const value = inputs[parameter.name] ?? "";
-      if (Number(parameter.mandatory ?? 0) === 1 && !value)
-        return `${parameter.desc ?? parameter.name} is required`;
-      if (value && parameter.regex && !new RegExp(parameter.regex).test(value))
-        return `${parameter.desc ?? parameter.name} is invalid`;
-    }
+    if (!selectedCategory?.categoryKey)
+      return "Service category not available.";
+    if (!billerId) return "Operator is required";
+    if (!consumerNumber.trim()) return "Consumer Number is required";
     return "";
   }
 
@@ -135,12 +119,13 @@ export function DynamicBbpsPage({
     setStatus("Fetching bill from DigiSeva...");
     setReceipt(null);
     try {
+      await api.get("/bbps/biller-details", { params: { billerId } });
       const { data } = await api.post("/bbps/fetch-bill", {
         billerId,
         categoryKey,
         categoryName: selectedCategory?.categoryName ?? categoryKey,
         billerName: selectedBiller?.billerName ?? billerId,
-        inputParameters: inputs,
+        inputParameters: { consumerNumber: consumerNumber.trim() },
       });
       setBill(data);
       setStatus("Bill fetched. Verify details before wallet payment.");
@@ -210,32 +195,6 @@ export function DynamicBbpsPage({
             <Zap className="mb-4 text-blue-300" />
             <form className="grid gap-4" onSubmit={fetchBill}>
               <label className="grid gap-2 text-sm text-slate-300">
-                Category
-                <select
-                  className="h-11 rounded-md border border-white/10 bg-white/8 px-3 text-sm"
-                  value={categoryKey}
-                  onChange={(event) => {
-                    setCategoryKey(event.target.value);
-                    setBillerId("");
-                  }}
-                >
-                  {allowedCategories.map((category: any) => (
-                    <option
-                      className="bg-slate-950"
-                      key={category.categoryKey}
-                      value={category.categoryKey}
-                    >
-                      {category.categoryName}
-                    </option>
-                  ))}
-                </select>
-                {requestedService && allowedCategories.length === 0 && (
-                  <span className="text-xs text-amber-200">
-                    Sync Digiseva categories to enable this service.
-                  </span>
-                )}
-              </label>
-              <label className="grid gap-2 text-sm text-slate-300">
                 Biller / Operator
                 <select
                   className="h-11 rounded-md border border-white/10 bg-white/8 px-3 text-sm"
@@ -252,31 +211,27 @@ export function DynamicBbpsPage({
                     </option>
                   ))}
                 </select>
+                {requestedService && allowedCategories.length === 0 && (
+                  <span className="text-xs text-amber-200">
+                    Sync Digiseva categories to enable this service.
+                  </span>
+                )}
               </label>
-              {parameters.map((parameter: any) => (
-                <label
-                  key={parameter.name}
-                  className="grid gap-2 text-sm text-slate-300"
-                >
-                  {parameter.desc ?? parameter.name}
-                  <Input
-                    value={inputs[parameter.name] ?? ""}
-                    onChange={(event) =>
-                      setInputs({
-                        ...inputs,
-                        [parameter.name]: event.target.value,
-                      })
-                    }
-                    placeholder={
-                      parameter.regex
-                        ? `Pattern: ${parameter.regex}`
-                        : parameter.name
-                    }
-                    required={Number(parameter.mandatory ?? 0) === 1}
-                  />
-                </label>
-              ))}
-              <Button disabled={busy || !billerId || !categoryKey} type="submit">
+              <label className="grid gap-2 text-sm text-slate-300">
+                Consumer Number
+                <Input
+                  value={consumerNumber}
+                  onChange={(event) => setConsumerNumber(event.target.value)}
+                  placeholder="Enter consumer number"
+                  required
+                />
+              </label>
+              <Button
+                disabled={
+                  busy || !billerId || !categoryKey || !consumerNumber.trim()
+                }
+                type="submit"
+              >
                 <Search size={16} /> {busy ? "Processing..." : "Fetch Bill"}
               </Button>
             </form>

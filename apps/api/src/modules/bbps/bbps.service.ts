@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { InjectConnection, InjectModel } from "@nestjs/mongoose";
 import { Connection, Model, Types } from "mongoose";
 import { nanoid } from "nanoid";
@@ -24,12 +25,27 @@ import { BbpsTransaction } from "./schemas/bbps-transaction.schema";
 
 @Injectable()
 export class BbpsService {
-  private readonly supportedCategoryAliases = [
-    ["electricity"],
-    ["water"],
-    ["insurance", "life insurance", "health insurance"],
-    ["piped gas", "png"],
-    ["lpg gas", "lpg"],
+  private readonly supportedCategories = [
+    {
+      serviceKey: "electricity",
+      aliases: ["electricity"],
+    },
+    {
+      serviceKey: "water",
+      aliases: ["water"],
+    },
+    {
+      serviceKey: "insurance",
+      aliases: ["insurance", "life insurance", "health insurance"],
+    },
+    {
+      serviceKey: "gas",
+      aliases: ["piped gas", "png"],
+    },
+    {
+      serviceKey: "lpg",
+      aliases: ["lpg gas", "lpg"],
+    },
   ];
 
   constructor(
@@ -52,15 +68,17 @@ export class BbpsService {
     private readonly ledgers: LedgerService,
     private readonly notifications: NotificationService,
     private readonly users: UsersService,
+    private readonly config: ConfigService,
   ) {}
 
   async categories() {
     const cached = await this.categoryModel
-      .find()
-      .sort({ categoryName: 1 })
+      .find({ serviceKey: { $in: this.supportedServiceKeys() } })
+      .sort({ serviceKey: 1 })
       .lean();
-    if (cached.length && this.hasSupportedCategories(cached))
+    if (cached.length && this.hasSupportedCategories(cached)) {
       return { categories: cached };
+    }
     return { categories: await this.syncCategories() };
   }
 
@@ -72,38 +90,48 @@ export class BbpsService {
       direction: "response",
       payload: response,
     });
-    const rows = Array.isArray(response?.data)
-      ? response.data
-      : Array.isArray(response?.categories)
-        ? response.categories
-        : [];
+    const rows = this.extractRows(response, [
+      "data",
+      "categories",
+      "categoryList",
+      "billerCategory",
+      "result",
+    ]);
+    const supportedRows = this.mapSupportedCategoryRows(rows);
     await Promise.all(
-      rows
-        .filter(
-          (row: any) =>
-            (row.categoryKey ?? row.categoryId ?? row.id) &&
-            (row.categoryName ?? row.name),
-        )
-        .map((row: any) =>
-          this.categoryModel.findOneAndUpdate(
-            { categoryKey: row.categoryKey ?? row.categoryId ?? row.id },
-            {
-              categoryKey: row.categoryKey ?? row.categoryId ?? row.id,
-              categoryName: row.categoryName ?? row.name,
-              iconUrl: row.iconUrl,
-              billerList: row.billerList ?? row.billerCount ?? 0,
-              syncedAt: new Date(),
-            },
-            { upsert: true, new: true },
-          ),
+      supportedRows.map(({ row, serviceKey }) =>
+        this.categoryModel.findOneAndUpdate(
+          { serviceKey },
+          {
+            categoryKey: this.pickString(row, [
+              "categoryKey",
+              "categoryId",
+              "id",
+              "key",
+            ]),
+            categoryName: this.pickString(row, ["categoryName", "name"]),
+            serviceKey,
+            iconUrl: row.iconUrl,
+            billerList: row.billerList ?? row.billerCount ?? 0,
+            syncedAt: new Date(),
+          },
+          { upsert: true, new: true },
         ),
+      ),
     );
-    return this.categoryModel.find().sort({ categoryName: 1 }).lean();
+    return this.categoryModel
+      .find({ serviceKey: { $in: this.supportedServiceKeys() } })
+      .sort({ serviceKey: 1 })
+      .lean();
   }
 
   async billers(categoryKey: string, forceSync = false) {
     const cached = await this.billerModel
-      .find({ categoryKey, billerStatus: "ACTIVE" })
+      .find({
+        categoryKey,
+        billerStatus: "ACTIVE",
+        isAvailable: { $ne: false },
+      })
       .sort({ billerName: 1 })
       .lean();
     const freshEnough = cached.some(
@@ -120,23 +148,41 @@ export class BbpsService {
       direction: "response",
       payload: response,
     });
-    const rows = Array.isArray(response?.data)
-      ? response.data
-      : Array.isArray(response?.billers)
-        ? response.billers
-        : [];
+    const rows = this.extractRows(response, [
+      "data",
+      "billers",
+      "billerList",
+      "biller",
+      "result",
+    ]);
     await Promise.all(
       rows
-        .filter((row: any) => (row.billerId ?? row.id) && (row.billerName ?? row.name))
+        .filter(
+          (row: any) =>
+            this.pickString(row, ["billerId", "id"]) &&
+            this.pickString(row, ["billerName", "name"]) &&
+            row.isAvailable !== false,
+        )
         .map((row: any) =>
           this.billerModel.findOneAndUpdate(
-            { billerId: row.billerId ?? row.id },
+            { billerId: this.pickString(row, ["billerId", "id"]) },
             {
-              billerId: row.billerId ?? row.id,
-              billerName: row.billerName ?? row.name,
+              billerId: this.pickString(row, ["billerId", "id"]),
+              billerName: this.pickString(row, ["billerName", "name"]),
               categoryKey: row.categoryKey ?? categoryKey,
+              categoryName: row.categoryName,
               type: row.type,
+              coverageCity: String(row.coverageCity ?? ""),
+              coverageState: String(row.coverageState ?? ""),
+              coveragePincode:
+                row.coveragePincode === undefined ||
+                row.coveragePincode === null
+                  ? undefined
+                  : String(row.coveragePincode),
+              updatedDate: row.updatedDate,
               billerStatus: row.billerStatus ?? "ACTIVE",
+              isAvailable: row.isAvailable !== false,
+              iconUrl: row.iconUrl,
               syncedAt: new Date(),
             },
             { upsert: true, new: true },
@@ -145,7 +191,11 @@ export class BbpsService {
     );
     return {
       billers: await this.billerModel
-        .find({ categoryKey, billerStatus: "ACTIVE" })
+        .find({
+          categoryKey,
+          billerStatus: "ACTIVE",
+          isAvailable: { $ne: false },
+        })
         .sort({ billerName: 1 })
         .lean(),
     };
@@ -161,20 +211,26 @@ export class BbpsService {
       return { details: cached };
     }
     const response = await this.digiseva.billerDetails(billerId);
+    const billerDetail = this.extractBillerDetail(response);
     await this.apiLogModel.create({
       provider: "digiseva",
       endpoint: "BillerDetails",
       direction: "response",
       payload: response,
     });
-    const parameters = Array.isArray(response?.parameters)
-      ? response.parameters
-      : Array.isArray(response?.data?.parameters)
-        ? response.data.parameters
-        : [];
+    const parameters = this.normalizeParameters(
+      this.extractRows(billerDetail, [
+        "parameters",
+        "inputParameters",
+        "inputParams",
+        "customerParams",
+        "params",
+        "fields",
+      ]),
+    );
     const details = await this.detailModel.findOneAndUpdate(
       { billerId },
-      { billerId, parameters, raw: response, syncedAt: new Date() },
+      { billerId, parameters, raw: billerDetail, syncedAt: new Date() },
       { upsert: true, new: true },
     );
     return { details };
@@ -185,24 +241,34 @@ export class BbpsService {
     retailerId: string,
     request?: { ip?: string },
   ) {
-    await this.assertRetailerCanTransact(retailerId);
+    const retailer = await this.assertRetailerCanTransact(retailerId);
+    this.assertRetailerServiceAccess(retailer, dto.categoryName);
     const details = await this.billerDetails(dto.billerId);
-    this.validateInputParameters(
+    const billerDetail = (details.details?.raw ?? {}) as Record<string, any>;
+    const inputParameters = this.normalizeFetchInputParameters(
       details.details?.parameters ?? [],
       dto.inputParameters,
+      retailer,
+    );
+    this.validateInputParameters(
+      details.details?.parameters ?? [],
+      inputParameters,
     );
     const externalRef = `BPUFETCH${Date.now()}${nanoid(6).toUpperCase()}`;
+    const initChannel = this.resolveInitChannel(billerDetail);
     const payload = {
       billerId: dto.billerId,
-      billerName: dto.billerName,
-      initChannel: "AGT",
+      initChannel,
       externalRef,
-      inputParameters: dto.inputParameters,
-      deviceInfo: {
-        ip: request?.ip ?? dto.deviceInfo?.ip ?? "127.0.0.1",
-        mac: dto.deviceInfo?.mac ?? "00:00:00:00:00:00",
-      },
-      remarks: { param1: 0 },
+      inputParameters: this.buildInputParametersPayload(inputParameters),
+      deviceInfo: this.buildDeviceInfo(
+        retailer,
+        dto.deviceInfo,
+        billerDetail,
+        initChannel,
+        request,
+      ),
+      remarks: this.buildRemarksPayload(),
       transactionAmount: 0,
     };
     await this.apiLogModel.create({
@@ -218,7 +284,7 @@ export class BbpsService {
       direction: "response",
       payload: bill,
     });
-    return this.normalizeBill(dto, bill, externalRef);
+    return this.normalizeBill({ ...dto, inputParameters }, bill, externalRef);
   }
 
   async payBill(
@@ -226,7 +292,8 @@ export class BbpsService {
     retailerId: string,
     request?: { ip?: string },
   ) {
-    await this.assertRetailerCanTransact(retailerId);
+    const retailer = await this.assertRetailerCanTransact(retailerId);
+    this.assertRetailerServiceAccess(retailer, dto.serviceCategory);
     const amount = Number(dto.amount);
     if (!Number.isFinite(amount) || amount <= 0)
       throw new BadRequestException("Enter a valid bill amount");
@@ -582,13 +649,314 @@ export class BbpsService {
     }
   }
 
+  private normalizeFetchInputParameters(
+    parameters: Array<Record<string, unknown>>,
+    input: Record<string, string>,
+    retailer: Record<string, any>,
+  ) {
+    const consumerNumber =
+      input.consumerNumber ?? input.ConsumerNumber ?? input.consumer_number;
+    const normalized = { ...input };
+    const firstCustomerParameter = parameters.find(
+      (parameter) => !this.isMobileParameter(parameter),
+    );
+    const firstParameterName = String(
+      firstCustomerParameter?.name ?? parameters[0]?.name ?? "",
+    );
+    if (
+      consumerNumber &&
+      firstParameterName &&
+      !normalized[firstParameterName]
+    ) {
+      normalized[firstParameterName] = consumerNumber;
+    }
+
+    for (const parameter of parameters) {
+      const name = String(parameter.name ?? "");
+      if (!name || normalized[name] || !this.isMobileParameter(parameter)) {
+        continue;
+      }
+      normalized[name] = String(retailer.mobile ?? "");
+    }
+
+    return normalized;
+  }
+
+  private buildInputParametersPayload(input: Record<string, string>) {
+    const payload: Record<string, string> = {};
+    for (let index = 1; index <= 7; index += 1) {
+      const key = `param${index}`;
+      if (input[key] !== undefined) payload[key] = String(input[key]);
+    }
+    for (const [key, value] of Object.entries(input)) {
+      if (key.startsWith("param")) continue;
+      payload[key] = String(value);
+    }
+    return payload;
+  }
+
+  private buildRemarksPayload() {
+    const remarks: Record<string, number> = {};
+    for (let index = 1; index <= 7; index += 1) {
+      remarks[`param${index}`] = 0;
+    }
+    return remarks;
+  }
+
+  private resolveInitChannel(billerDetail: Record<string, any>) {
+    const configured = this.config.get<string>("DIGISEVA_INIT_CHANNEL", "AGT");
+    const channels = Array.isArray(billerDetail.initChannels)
+      ? billerDetail.initChannels
+      : [];
+    const hasConfigured = channels.some(
+      (channel) =>
+        String(channel.name ?? "").toUpperCase() === configured.toUpperCase(),
+    );
+    if (hasConfigured) return configured.toUpperCase();
+    return String(channels[0]?.name ?? configured).toUpperCase();
+  }
+
+  private buildDeviceInfo(
+    retailer: Record<string, any>,
+    dtoDeviceInfo?: Record<string, unknown>,
+    billerDetail: Record<string, any> = {},
+    initChannel = "AGT",
+    request?: { ip?: string },
+  ) {
+    const channel = this.findInitChannel(billerDetail, initChannel);
+    const requiredFields = Array.isArray(channel?.deviceInfo)
+      ? channel.deviceInfo
+      : [];
+    const location =
+      (retailer.kyc?.location as Record<string, unknown> | undefined) ?? {};
+    const latitude =
+      dtoDeviceInfo?.latitude ?? dtoDeviceInfo?.lat ?? location.latitude;
+    const longitude =
+      dtoDeviceInfo?.longitude ?? dtoDeviceInfo?.lng ?? location.longitude;
+    const geoCode =
+      dtoDeviceInfo?.geoCode ??
+      (latitude && longitude
+        ? `${latitude},${longitude}`
+        : this.config.get<string>("DIGISEVA_AGENT_GEOCODE", "28.6326,77.2175"));
+
+    const values: Record<string, string> = {
+      terminalId: String(
+        dtoDeviceInfo?.terminalId ??
+          this.config.get<string>("DIGISEVA_TERMINAL_ID") ??
+          this.numericTerminalId(retailer.retailerCode) ??
+          "123456",
+      ),
+      mobile: String(
+        dtoDeviceInfo?.mobile ??
+          retailer.mobile ??
+          this.config.get<string>("DIGISEVA_AGENT_MOBILE", "9999999999"),
+      ),
+      postalCode: String(
+        dtoDeviceInfo?.postalCode ??
+          dtoDeviceInfo?.pincode ??
+          retailer.address?.pincode ??
+          this.config.get<string>("DIGISEVA_AGENT_PINCODE", "110001"),
+      ),
+      geoCode: String(geoCode),
+      ip: String(dtoDeviceInfo?.ip ?? request?.ip ?? "127.0.0.1"),
+      mac: String(dtoDeviceInfo?.mac ?? "00:00:00:00:00:00"),
+    };
+
+    if (!requiredFields.length) {
+      return initChannel === "AGT"
+        ? {
+            terminalId: values.terminalId,
+            mobile: values.mobile,
+            postalCode: values.postalCode,
+            geoCode: values.geoCode,
+          }
+        : { ip: values.ip, mac: values.mac };
+    }
+
+    return requiredFields.reduce(
+      (deviceInfo: Record<string, string>, field: Record<string, unknown>) => {
+        const name = String(field.name ?? "");
+        if (name && values[name]) deviceInfo[name] = values[name];
+        return deviceInfo;
+      },
+      {},
+    );
+  }
+
+  private findInitChannel(
+    billerDetail: Record<string, any>,
+    initChannel: string,
+  ) {
+    const channels = Array.isArray(billerDetail.initChannels)
+      ? billerDetail.initChannels
+      : [];
+    return channels.find(
+      (channel) =>
+        String(channel.name ?? "").toUpperCase() === initChannel.toUpperCase(),
+    );
+  }
+
+  private numericTerminalId(value?: string) {
+    const digits = String(value ?? "").replace(/\D/g, "");
+    return digits ? digits.slice(0, 10) : undefined;
+  }
+
+  private extractRows(payload: any, keys: string[]): any[] {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== "object") return [];
+    for (const key of keys) {
+      const value = payload[key];
+      if (Array.isArray(value)) return value;
+      if (value && typeof value === "object") {
+        const nested = this.extractRows(value, keys);
+        if (nested.length) return nested;
+      }
+    }
+    for (const value of Object.values(payload)) {
+      if (Array.isArray(value)) return value;
+    }
+    return [];
+  }
+
+  private extractBillerDetail(payload: any) {
+    return (
+      payload?.data?.data?.data ??
+      payload?.data?.data ??
+      payload?.data ??
+      payload
+    );
+  }
+
+  private normalizeParameters(parameters: Array<Record<string, unknown>>) {
+    return parameters
+      .map((parameter) => {
+        const name = this.pickString(parameter, [
+          "name",
+          "paramName",
+          "parameterName",
+          "key",
+        ]);
+        const desc =
+          this.pickString(parameter, [
+            "desc",
+            "description",
+            "displayName",
+            "label",
+          ]) || name;
+        if (!name) return undefined;
+        return {
+          ...parameter,
+          name,
+          desc,
+          mandatory:
+            parameter.mandatory ??
+            parameter.isMandatory ??
+            parameter.required ??
+            0,
+          regex: parameter.regex ?? parameter.pattern ?? parameter.regEx,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  private isMobileParameter(parameter: Record<string, unknown>) {
+    const text = this.normalizeName(
+      [
+        parameter.name,
+        parameter.desc,
+        parameter.description,
+        parameter.displayName,
+        parameter.label,
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
+    return text.includes("mobile");
+  }
+
+  private pickString(row: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+      const value = row[key];
+      if (value !== undefined && value !== null && String(value).trim()) {
+        return String(value).trim();
+      }
+    }
+    return "";
+  }
+
+  private mapSupportedCategoryRows(rows: Array<Record<string, unknown>>) {
+    return this.supportedCategories
+      .map((service) => {
+        const row =
+          rows.find((category) =>
+            this.categoryMatchesService(category, service.aliases, "exact"),
+          ) ??
+          rows.find((category) =>
+            this.categoryMatchesService(category, service.aliases, "contains"),
+          );
+        return row ? { serviceKey: service.serviceKey, row } : undefined;
+      })
+      .filter(Boolean) as Array<{
+      serviceKey: string;
+      row: Record<string, unknown>;
+    }>;
+  }
+
+  private categoryMatchesService(
+    category: Record<string, unknown>,
+    aliases: string[],
+    mode: "exact" | "contains",
+  ) {
+    const categoryName = this.normalizeName(
+      this.pickString(category, ["categoryName", "name"]),
+    );
+    return aliases.some((alias) => {
+      const normalizedAlias = this.normalizeName(alias);
+      return mode === "exact"
+        ? categoryName === normalizedAlias
+        : categoryName.includes(normalizedAlias);
+    });
+  }
+
+  private supportedServiceKeys() {
+    return this.supportedCategories.map((category) => category.serviceKey);
+  }
+
+  private normalizeName(value: string) {
+    return value.toLowerCase().replace(/&/g, "and").replace(/\s+/g, " ").trim();
+  }
+
   private hasSupportedCategories(categories: Array<Record<string, unknown>>) {
-    const names = categories.map((category) =>
-      String(category.categoryName ?? "").toLowerCase(),
+    const serviceKeys = new Set(
+      categories.map((category) => String(category.serviceKey ?? "")),
     );
-    return this.supportedCategoryAliases.every((aliases) =>
-      names.some((name) => aliases.some((alias) => name.includes(alias))),
+    return this.supportedCategories.every((category) =>
+      serviceKeys.has(category.serviceKey),
     );
+  }
+
+  private serviceKeyFromName(value?: string) {
+    const normalized = this.normalizeName(String(value ?? ""));
+    return this.supportedCategories.find((category) =>
+      category.aliases.some((alias) => {
+        const normalizedAlias = this.normalizeName(alias);
+        return (
+          normalized === normalizedAlias || normalized.includes(normalizedAlias)
+        );
+      }),
+    )?.serviceKey;
+  }
+
+  private assertRetailerServiceAccess(
+    retailer: Record<string, any>,
+    serviceName?: string,
+  ) {
+    const serviceKey = this.serviceKeyFromName(serviceName);
+    if (serviceKey && retailer.serviceAccess?.[serviceKey] === false) {
+      throw new ForbiddenException(
+        `${serviceName} service is disabled by your distributor.`,
+      );
+    }
   }
 
   private normalizeBill(dto: FetchBillDto, bill: any, externalRef: string) {
@@ -649,5 +1017,6 @@ export class BbpsService {
         "Your account is under verification. BBPS services and wallet usage are disabled until admin approval.",
       );
     }
+    return user;
   }
 }

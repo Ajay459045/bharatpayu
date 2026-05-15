@@ -34,6 +34,16 @@ export class User {
   @Prop({ type: Types.ObjectId, ref: "User", index: true })
   distributorId?: Types.ObjectId;
 
+  @Prop({ type: Types.ObjectId, ref: "User", index: true })
+  createdById?: Types.ObjectId;
+
+  @Prop({
+    enum: ["self", "admin", "distributor"],
+    default: "self",
+    index: true,
+  })
+  createdBy!: string;
+
   @Prop()
   passwordHash?: string;
 
@@ -82,6 +92,24 @@ export class User {
 
   @Prop({ type: Object, default: {} })
   kyc!: Record<string, unknown>;
+
+  @Prop({
+    type: {
+      electricity: Boolean,
+      water: Boolean,
+      lpg: Boolean,
+      gas: Boolean,
+      insurance: Boolean,
+    },
+    default: {
+      electricity: true,
+      water: true,
+      lpg: true,
+      gas: true,
+      insurance: true,
+    },
+  })
+  serviceAccess!: Record<string, boolean>;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

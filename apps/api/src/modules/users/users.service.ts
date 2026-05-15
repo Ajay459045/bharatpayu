@@ -113,6 +113,7 @@ export class UsersService {
 
   async createDistributorRetailer(input: {
     distributorId: string;
+    createdById?: string;
     fullName: string;
     businessName: string;
     mobile: string;
@@ -122,6 +123,19 @@ export class UsersService {
     district?: string;
     fullAddress?: string;
     pincode?: string;
+    documents?: {
+      panImage: string;
+      aadhaarFront: string;
+      aadhaarBack: string;
+      selfie: string;
+    };
+    location?: {
+      latitude: number;
+      longitude: number;
+      ipAddress?: string;
+      deviceInfo: Record<string, unknown>;
+    };
+    autoApprove?: boolean;
   }) {
     const [existingEmail, existingMobile] = await Promise.all([
       this.findByEmail(input.email),
@@ -131,7 +145,8 @@ export class UsersService {
       throw new BadRequestException("Email is already registered");
     if (existingMobile)
       throw new BadRequestException("Mobile number is already registered");
-    return this.userModel.create({
+    const autoApprove = input.autoApprove !== false;
+    const user = await this.userModel.create({
       name: input.fullName,
       businessName: input.businessName,
       mobile: input.mobile,
@@ -140,9 +155,13 @@ export class UsersService {
       passwordHash: input.passwordHash,
       role: "retailer",
       distributorId: new Types.ObjectId(input.distributorId),
-      approvalStatus: "approved",
+      createdById: input.createdById
+        ? new Types.ObjectId(input.createdById)
+        : new Types.ObjectId(input.distributorId),
+      createdBy: "distributor",
+      approvalStatus: autoApprove ? "approved" : "pending",
       emailVerified: true,
-      kycStatus: "verified",
+      kycStatus: autoApprove ? "verified" : "submitted",
       loginOtpEnabled: true,
       address: {
         state: input.state ?? "",
@@ -150,7 +169,31 @@ export class UsersService {
         fullAddress: input.fullAddress ?? "",
         pincode: input.pincode ?? "",
       },
+      kyc: {
+        submittedAt: new Date(),
+        documents: input.documents ?? {},
+        location: input.location ?? {},
+      },
+      serviceAccess: {
+        electricity: true,
+        water: true,
+        lpg: true,
+        gas: true,
+        insurance: true,
+      },
     });
+
+    const userId = new Types.ObjectId(String(user._id));
+    await Promise.all([
+      input.documents
+        ? this.documentModel.create({ userId, ...input.documents })
+        : Promise.resolve(),
+      input.location
+        ? this.locationModel.create({ userId, ...input.location })
+        : Promise.resolve(),
+    ]);
+
+    return user;
   }
 
   async markEmailVerified(userId: string) {

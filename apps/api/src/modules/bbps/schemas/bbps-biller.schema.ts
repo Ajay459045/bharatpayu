@@ -15,10 +15,31 @@ export class BbpsBiller {
   categoryKey!: string;
 
   @Prop()
+  categoryName?: string;
+
+  @Prop()
   type?: string;
+
+  @Prop()
+  coverageCity?: string;
+
+  @Prop()
+  coverageState?: string;
+
+  @Prop()
+  coveragePincode?: string;
+
+  @Prop()
+  updatedDate?: string;
 
   @Prop({ default: "ACTIVE", index: true })
   billerStatus!: string;
+
+  @Prop({ default: true, index: true })
+  isAvailable!: boolean;
+
+  @Prop()
+  iconUrl?: string;
 
   @Prop()
   syncedAt?: Date;

@@ -11,6 +11,9 @@ export class BbpsCategory {
   @Prop({ required: true, index: true })
   categoryName!: string;
 
+  @Prop({ required: true, index: true })
+  serviceKey!: string;
+
   @Prop()
   iconUrl?: string;
 

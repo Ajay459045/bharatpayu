@@ -14,6 +14,7 @@ import { Model, Types } from "mongoose";
 import { nanoid } from "nanoid";
 import * as nodemailer from "nodemailer";
 import { SecuritySetting } from "../admin/schemas/security-setting.schema";
+import { BbpsService } from "../bbps/bbps.service";
 import { NotificationService } from "../notification/notification.service";
 import { UsersService } from "../users/users.service";
 import { RegisterDto } from "./dto/otp.dto";
@@ -33,6 +34,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly notifications: NotificationService,
+    private readonly bbps: BbpsService,
     @InjectModel(Device.name) private readonly deviceModel: Model<Device>,
     @InjectModel(OtpLog.name) private readonly otpModel: Model<OtpLog>,
     @InjectModel(SecuritySetting.name)
@@ -197,6 +199,7 @@ export class AuthService {
       refreshTokenHash: await bcrypt.hash(refreshToken, 12),
       expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30),
     });
+    await this.syncBbpsCategoriesForRetailer(user);
 
     const payload = {
       sub: String(user._id),
@@ -221,6 +224,15 @@ export class AuthService {
       }),
       refreshToken,
     };
+  }
+
+  private async syncBbpsCategoriesForRetailer(user: any) {
+    if (user.role !== "retailer") return;
+    try {
+      await this.bbps.syncCategories();
+    } catch (error) {
+      console.error("BBPS category sync failed during login", error);
+    }
   }
 
   private async issueOtp(

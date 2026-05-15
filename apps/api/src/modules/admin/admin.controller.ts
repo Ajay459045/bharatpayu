@@ -13,11 +13,13 @@ import {
   IsBoolean,
   IsIn,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Min,
 } from "class-validator";
 import { Model, Types } from "mongoose";
+import * as bcrypt from "bcryptjs";
 import { Roles } from "../../shared/roles.decorator";
 import { RolesGuard } from "../../shared/roles.guard";
 import { NotificationService } from "../notification/notification.service";
@@ -27,6 +29,7 @@ import { ApiLog } from "../bbps/schemas/api-log.schema";
 import { AdminSettlementRequest } from "../bbps/schemas/admin-settlement-request.schema";
 import { BbpsTransaction } from "../bbps/schemas/bbps-transaction.schema";
 import { CommissionService } from "../commission/commission.service";
+import { Ledger } from "../ledger/schemas/ledger.schema";
 import { LedgerService } from "../ledger/ledger.service";
 import { TdsService } from "../tds/tds.service";
 import { WalletLoadRequest } from "../wallet/schemas/wallet-load-request.schema";
@@ -132,6 +135,55 @@ class WalletAdjustmentDto {
   reason!: string;
 }
 
+class AdminUserUpdateDto {
+  @IsOptional()
+  @IsString()
+  fullName?: string;
+
+  @IsOptional()
+  @IsString()
+  businessName?: string;
+
+  @IsOptional()
+  @IsString()
+  mobile?: string;
+
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  state?: string;
+
+  @IsOptional()
+  @IsString()
+  district?: string;
+
+  @IsOptional()
+  @IsString()
+  fullAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  pincode?: string;
+}
+
+class AdminUserStatusDto {
+  @IsIn(["active", "suspended", "approved", "rejected", "documents_requested"])
+  status!: string;
+}
+
+class AdminUserPasswordDto {
+  @IsString()
+  password!: string;
+}
+
+class AdminUserServicesDto {
+  @IsObject()
+  services!: Record<string, boolean>;
+}
+
 class SettlementActionDto {
   @IsOptional()
   @IsString()
@@ -165,6 +217,7 @@ export class AdminController {
     private readonly settlementModel: Model<AdminSettlementRequest>,
     @InjectModel(ApiLog.name) private readonly apiLogModel: Model<ApiLog>,
     @InjectModel(Wallet.name) private readonly walletModel: Model<Wallet>,
+    @InjectModel(Ledger.name) private readonly ledgerModel: Model<Ledger>,
     @InjectModel(WalletLoadRequest.name)
     private readonly walletLoadRequestModel: Model<WalletLoadRequest>,
     @InjectModel(ActivityLog.name)
@@ -228,19 +281,96 @@ export class AdminController {
       ? Math.max(activeDistributors, 486)
       : activeDistributors;
     const demoTransactions = [
-      ["BPU202605150928A1", "Rajasthan Digital Seva", "Electricity Bill Payment", 8240, "success", "Jaipur Vidyut Vitran Nigam"],
-      ["BPU202605150924B7", "Shree Pay Point", "Water Bill Payment", 2175, "success", "Delhi Jal Board"],
-      ["BPU202605150919C4", "Om Finserve Kendra", "Insurance Premium Payment", 18650, "success", "LIC of India"],
-      ["BPU202605150914D2", "Digital Mitra Hub", "Piped Gas Bill Payment", 1420, "pending", "Indraprastha Gas"],
-      ["BPU202605150907E9", "PayU Bharat Retail", "LPG Gas Payment", 1187, "success", "BharatGas"],
-      ["BPU202605150859F5", "Saini Utility Store", "Electricity Bill Payment", 6340, "success", "BSES Rajdhani"],
-      ["BPU202605150851G8", "Maa Telecom Services", "Insurance Premium Payment", 27400, "success", "HDFC Life"],
-      ["BPU202605150844H3", "Kumar BBPS Point", "Water Bill Payment", 980, "failed", "PHED Rajasthan"],
+      [
+        "BPU202605150928A1",
+        "Rajasthan Digital Seva",
+        "Electricity Bill Payment",
+        8240,
+        "success",
+        "Jaipur Vidyut Vitran Nigam",
+      ],
+      [
+        "BPU202605150924B7",
+        "Shree Pay Point",
+        "Water Bill Payment",
+        2175,
+        "success",
+        "Delhi Jal Board",
+      ],
+      [
+        "BPU202605150919C4",
+        "Om Finserve Kendra",
+        "Insurance Premium Payment",
+        18650,
+        "success",
+        "LIC of India",
+      ],
+      [
+        "BPU202605150914D2",
+        "Digital Mitra Hub",
+        "Piped Gas Bill Payment",
+        1420,
+        "pending",
+        "Indraprastha Gas",
+      ],
+      [
+        "BPU202605150907E9",
+        "PayU Bharat Retail",
+        "LPG Gas Payment",
+        1187,
+        "success",
+        "BharatGas",
+      ],
+      [
+        "BPU202605150859F5",
+        "Saini Utility Store",
+        "Electricity Bill Payment",
+        6340,
+        "success",
+        "BSES Rajdhani",
+      ],
+      [
+        "BPU202605150851G8",
+        "Maa Telecom Services",
+        "Insurance Premium Payment",
+        27400,
+        "success",
+        "HDFC Life",
+      ],
+      [
+        "BPU202605150844H3",
+        "Kumar BBPS Point",
+        "Water Bill Payment",
+        980,
+        "failed",
+        "PHED Rajasthan",
+      ],
     ];
     const demoApprovals = [
-      ["APR-10291", "Ravi Kumar", "Ravi Digital Seva", "Jaipur, Rajasthan", "submitted", "15 May 2026, 09:42 am"],
-      ["APR-10288", "Neha Sharma", "NS Pay Point", "Lucknow, Uttar Pradesh", "documents_requested", "15 May 2026, 08:18 am"],
-      ["APR-10284", "Imran Khan", "City Utility Kendra", "Bhopal, Madhya Pradesh", "submitted", "14 May 2026, 07:55 pm"],
+      [
+        "APR-10291",
+        "Ravi Kumar",
+        "Ravi Digital Seva",
+        "Jaipur, Rajasthan",
+        "submitted",
+        "15 May 2026, 09:42 am",
+      ],
+      [
+        "APR-10288",
+        "Neha Sharma",
+        "NS Pay Point",
+        "Lucknow, Uttar Pradesh",
+        "documents_requested",
+        "15 May 2026, 08:18 am",
+      ],
+      [
+        "APR-10284",
+        "Imran Khan",
+        "City Utility Kendra",
+        "Bhopal, Madhya Pradesh",
+        "submitted",
+        "14 May 2026, 07:55 pm",
+      ],
     ];
 
     const stats = [
@@ -262,14 +392,14 @@ export class AdminController {
         "-2.4%",
         [70, 62, 58, 46, 38, 30],
       ],
-      [
-        "Failed Transactions",
-        displayFailed,
-        "-8.1%",
-        [50, 48, 42, 34, 28, 22],
-      ],
+      ["Failed Transactions", displayFailed, "-8.1%", [50, 48, 42, 34, 28, 22]],
       ["Total Revenue", displayRevenue, "+21.8%", [25, 48, 40, 65, 75, 100]],
-      ["Total Commission", displayCommission, "+12.9%", [20, 30, 48, 52, 70, 82]],
+      [
+        "Total Commission",
+        displayCommission,
+        "+12.9%",
+        [20, 30, 48, 52, 70, 82],
+      ],
       ["Total TDS", displayTds, "+6.2%", [10, 20, 26, 32, 38, 42]],
       [
         "Total Wallet Balance",
@@ -300,16 +430,18 @@ export class AdminController {
           { name: "Piped Gas", value: 173450000 },
           { name: "LPG", value: 153435000 },
         ]
-      : ["Electricity", "Water", "LPG", "Piped Gas", "Insurance"].map((name) => ({
-          name,
-          value: transactions
-            .filter((txn) =>
-              String(txn.serviceCategory)
-                .toLowerCase()
-                .includes(name.toLowerCase().replace("piped ", "")),
-            )
-            .reduce((sum, txn) => sum + Number(txn.amount ?? 0), 0),
-        }));
+      : ["Electricity", "Water", "LPG", "Piped Gas", "Insurance"].map(
+          (name) => ({
+            name,
+            value: transactions
+              .filter((txn) =>
+                String(txn.serviceCategory)
+                  .toLowerCase()
+                  .includes(name.toLowerCase().replace("piped ", "")),
+              )
+              .reduce((sum, txn) => sum + Number(txn.amount ?? 0), 0),
+          }),
+        );
 
     const failedApiLogs = apiLogs.filter(
       (log) => Number(log.statusCode ?? 200) >= 400,
@@ -406,13 +538,15 @@ export class AdminController {
         : [
             {
               title: "FY 2025-26 volume crossed Rs 150 crore",
-              detail: "Founded in 2021 and operating across five BBPS categories",
+              detail:
+                "Founded in 2021 and operating across five BBPS categories",
               time: "now",
               tone: "green",
             },
             {
               title: "DigiSeva category sync ready",
-              detail: "Electricity, water, insurance, piped gas and LPG flows available",
+              detail:
+                "Electricity, water, insurance, piped gas and LPG flows available",
               time: "5 minutes ago",
               tone: "blue",
             },
@@ -477,12 +611,15 @@ export class AdminController {
       dto.approvalStatus,
       dto.rejectionReason,
     );
-    await this.notifications.enqueue(`retailer.${dto.approvalStatus}`, {
-      userId: id,
-      email: user?.email,
-      rejectionReason: dto.rejectionReason,
-      channels: ["email", "push"],
-    });
+    await this.notifications.enqueue(
+      `${user?.role ?? "user"}.${dto.approvalStatus}`,
+      {
+        userId: id,
+        email: user?.email,
+        rejectionReason: dto.rejectionReason,
+        channels: ["email", "push"],
+      },
+    );
     return { user };
   }
 
@@ -756,6 +893,161 @@ export class AdminController {
       .limit(1000)
       .lean();
     return { users };
+  }
+
+  @Roles("super_admin", "admin")
+  @Get("users/:id")
+  async adminUserDetail(@Param("id") id: string) {
+    const objectId = new Types.ObjectId(id);
+    const [user, wallets, ledgers, transactions, activities] =
+      await Promise.all([
+        this.userModel
+          .findById(objectId)
+          .populate("distributorId", "name businessName mobile email")
+          .populate("createdById", "name businessName mobile email role")
+          .lean(),
+        this.walletModel.find({ userId: objectId }).lean(),
+        this.ledgerModel
+          .find({ userId: objectId })
+          .sort({ createdAt: -1 })
+          .limit(100)
+          .lean(),
+        this.transactionModel
+          .find({
+            $or: [{ retailerId: objectId }, { distributorId: objectId }],
+          })
+          .sort({ createdAt: -1 })
+          .limit(100)
+          .lean(),
+        this.activityLogModel
+          .find({
+            $or: [
+              { userId: objectId },
+              { actorId: objectId },
+              { "metadata.userId": id },
+              { "metadata.retailerId": id },
+            ],
+          })
+          .sort({ createdAt: -1 })
+          .limit(100)
+          .lean(),
+      ]);
+    return { user, wallets, ledgers, transactions, activities };
+  }
+
+  @Roles("super_admin", "admin")
+  @Patch("users/:id")
+  async updateAdminUser(
+    @Param("id") id: string,
+    @Body() dto: AdminUserUpdateDto,
+    @Req() req?: { user?: { id?: string }; ip?: string },
+  ) {
+    const update: Record<string, unknown> = {};
+    if (dto.fullName) update.name = dto.fullName;
+    if (dto.businessName) update.businessName = dto.businessName;
+    if (dto.mobile) update.mobile = dto.mobile;
+    if (dto.email) update.email = dto.email.toLowerCase();
+    if (dto.state !== undefined) update["address.state"] = dto.state;
+    if (dto.district !== undefined) update["address.district"] = dto.district;
+    if (dto.fullAddress !== undefined) {
+      update["address.fullAddress"] = dto.fullAddress;
+    }
+    if (dto.pincode !== undefined) update["address.pincode"] = dto.pincode;
+    const user = await this.userModel.findByIdAndUpdate(
+      id,
+      { $set: update },
+      { new: true },
+    );
+    await this.activityLogModel.create({
+      actorId: req?.user?.id ? new Types.ObjectId(req.user.id) : undefined,
+      action: "admin.user.updated",
+      ipAddress: req?.ip,
+      metadata: { userId: id },
+    });
+    return { user };
+  }
+
+  @Roles("super_admin", "admin")
+  @Patch("users/:id/status")
+  async updateAdminUserStatus(
+    @Param("id") id: string,
+    @Body() dto: AdminUserStatusDto,
+    @Req() req?: { user?: { id?: string }; ip?: string },
+  ) {
+    const approvalStatus =
+      dto.status === "active"
+        ? "approved"
+        : dto.status === "suspended"
+          ? "suspended"
+          : dto.status;
+    const user = await this.userModel.findByIdAndUpdate(
+      id,
+      {
+        approvalStatus,
+        isActive: dto.status !== "suspended" && dto.status !== "rejected",
+        ...(approvalStatus === "approved" ? { kycStatus: "verified" } : {}),
+      },
+      { new: true },
+    );
+    await this.activityLogModel.create({
+      actorId: req?.user?.id ? new Types.ObjectId(req.user.id) : undefined,
+      action: `admin.user.${dto.status}`,
+      ipAddress: req?.ip,
+      metadata: { userId: id },
+    });
+    return { user };
+  }
+
+  @Roles("super_admin", "admin")
+  @Patch("users/:id/password")
+  async resetAdminUserPassword(
+    @Param("id") id: string,
+    @Body() dto: AdminUserPasswordDto,
+    @Req() req?: { user?: { id?: string }; ip?: string },
+  ) {
+    const user = await this.userModel.findByIdAndUpdate(
+      id,
+      { passwordHash: await bcrypt.hash(dto.password, 12) },
+      { new: true },
+    );
+    await this.activityLogModel.create({
+      actorId: req?.user?.id ? new Types.ObjectId(req.user.id) : undefined,
+      action: "admin.user.password_reset",
+      ipAddress: req?.ip,
+      metadata: { userId: id },
+    });
+    return { user };
+  }
+
+  @Roles("super_admin", "admin")
+  @Patch("users/:id/services")
+  async updateAdminUserServices(
+    @Param("id") id: string,
+    @Body() dto: AdminUserServicesDto,
+    @Req() req?: { user?: { id?: string }; ip?: string },
+  ) {
+    const serviceAccess = [
+      "electricity",
+      "water",
+      "lpg",
+      "gas",
+      "insurance",
+    ].reduce(
+      (next, key) => ({ ...next, [key]: dto.services?.[key] !== false }),
+      {},
+    );
+    const user = await this.userModel.findByIdAndUpdate(
+      id,
+      { serviceAccess },
+      { new: true },
+    );
+    await this.activityLogModel.create({
+      actorId: req?.user?.id ? new Types.ObjectId(req.user.id) : undefined,
+      action: "admin.user.services_updated",
+      ipAddress: req?.ip,
+      metadata: { userId: id, serviceAccess },
+    });
+    return { user };
   }
 
   @Roles("super_admin", "admin")

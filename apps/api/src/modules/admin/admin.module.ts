@@ -14,6 +14,7 @@ import {
 } from "../bbps/schemas/bbps-transaction.schema";
 import { CommissionModule } from "../commission/commission.module";
 import { LedgerModule } from "../ledger/ledger.module";
+import { Ledger, LedgerSchema } from "../ledger/schemas/ledger.schema";
 import { TdsModule } from "../tds/tds.module";
 import { WalletModule } from "../wallet/wallet.module";
 import { Wallet, WalletSchema } from "../wallet/schemas/wallet.schema";
@@ -49,6 +50,7 @@ import {
       },
       { name: ApiLog.name, schema: ApiLogSchema },
       { name: Wallet.name, schema: WalletSchema },
+      { name: Ledger.name, schema: LedgerSchema },
       { name: WalletLoadRequest.name, schema: WalletLoadRequestSchema },
     ]),
   ],

@@ -13,10 +13,6 @@ export function getApiBaseUrl() {
     return normalizeApiUrl(configuredUrl);
   }
 
-  if (typeof window !== "undefined") {
-    return normalizeApiUrl(`${window.location.origin}/api/v1`);
-  }
-
   return normalizeApiUrl(fallbackApiUrl);
 }
 

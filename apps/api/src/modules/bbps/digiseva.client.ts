@@ -1,5 +1,9 @@
 import { HttpService } from "@nestjs/axios";
-import { Injectable } from "@nestjs/common";
+import {
+  BadGatewayException,
+  BadRequestException,
+  Injectable,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { firstValueFrom } from "rxjs";
 
@@ -11,7 +15,7 @@ export class DigiSevaClient {
   ) {}
 
   async categories() {
-    if (this.config.get("NODE_ENV") !== "production") {
+    if (this.shouldUseMock()) {
       return {
         status: true,
         data: [
@@ -23,16 +27,16 @@ export class DigiSevaClient {
         ],
       };
     }
-    const response = await firstValueFrom(
+    const response = await this.providerRequest(
       this.http.get(`${this.baseUrl()}/InstantPay/BillerCategory`, {
-        headers: this.headers(),
+        headers: this.getHeaders(),
       }),
     );
     return response.data;
   }
 
   async billers(categoryKey: string) {
-    if (this.config.get("NODE_ENV") !== "production") {
+    if (this.shouldUseMock()) {
       return {
         data: [
           {
@@ -45,17 +49,17 @@ export class DigiSevaClient {
         ],
       };
     }
-    const response = await firstValueFrom(
+    const response = await this.providerRequest(
       this.http.get(`${this.baseUrl()}/InstantPay/BillerList`, {
         params: { categoryKey },
-        headers: this.headers(),
+        headers: this.getHeaders(),
       }),
     );
     return response.data;
   }
 
   async billerDetails(billerId: string) {
-    if (this.config.get("NODE_ENV") !== "production") {
+    if (this.shouldUseMock()) {
       return {
         parameters: [
           {
@@ -67,17 +71,17 @@ export class DigiSevaClient {
         ],
       };
     }
-    const response = await firstValueFrom(
+    const response = await this.providerRequest(
       this.http.get(`${this.baseUrl()}/InstantPay/BillerDetails`, {
         params: { billerId },
-        headers: this.headers(),
+        headers: this.getHeaders(),
       }),
     );
     return response.data;
   }
 
   async fetchBill(payload: Record<string, unknown>) {
-    if (this.config.get("NODE_ENV") !== "production") {
+    if (this.shouldUseMock()) {
       return {
         customerName: "Utility Customer",
         billAmount: 1240,
@@ -90,12 +94,16 @@ export class DigiSevaClient {
           )[0] ?? "",
       };
     }
-    const response = await firstValueFrom(
+    const response = await this.providerRequest(
       this.http.post(`${this.baseUrl()}/InstantPay/FetchBillDetails`, payload, {
-        headers: this.headers(),
+        headers: this.postHeaders(),
       }),
     );
     return response.data;
+  }
+
+  isMockMode() {
+    return this.shouldUseMock();
   }
 
   private baseUrl() {
@@ -105,18 +113,84 @@ export class DigiSevaClient {
     );
   }
 
-  private headers() {
+  private async providerRequest(request: ReturnType<HttpService["get"]>) {
+    try {
+      return await firstValueFrom(request);
+    } catch (error: any) {
+      const statusCode = error?.response?.status;
+      const providerMessage =
+        error?.response?.data?.message ??
+        error?.response?.data?.error ??
+        error?.message ??
+        "Provider request failed";
+      throw new BadGatewayException({
+        provider: "digiseva",
+        statusCode,
+        message: providerMessage,
+      });
+    }
+  }
+
+  private getHeaders() {
     return {
-      "x-api-key":
-        this.config.get<string>("DIGISEVA_API_KEY") ??
-        this.config.get<string>("DIGISEVA_CLIENT_ID") ??
-        "",
-      usercode:
-        this.config.get<string>("DIGISEVA_USERCODE") ??
-        this.config.get<string>("DIGISEVA_CLIENT_SECRET") ??
-        "",
-      "access-mode": this.config.get<string>("DIGISEVA_ACCESS_MODE", "web"),
-      "Content-Type": "application/json-patch+json",
+      ...this.authHeaders(),
+      accept: "*/*",
     };
+  }
+
+  private postHeaders() {
+    return {
+      ...this.authHeaders(),
+      "Content-Type": "application/json-patch+json",
+      accept: "*/*",
+    };
+  }
+
+  private authHeaders() {
+    const apiKey = this.configValue("DIGISEVA_API_KEY", "DIGISEVA_CLIENT_ID");
+    const usercode = this.configValue(
+      "DIGISEVA_USERCODE",
+      "DIGISEVA_POS_ID",
+      "DIGISEVA_CLIENT_SECRET",
+    );
+    if (!apiKey || !usercode) {
+      throw new BadRequestException(
+        "DigiSeva API credentials are not configured",
+      );
+    }
+    return {
+      "x-api-key": apiKey,
+      usercode,
+      "access-mode": this.config.get<string>("DIGISEVA_ACCESS_MODE", "web"),
+    };
+  }
+
+  private shouldUseMock() {
+    const mode = this.config.get<string>("DIGISEVA_MOCK", "").toLowerCase();
+    if (["1", "true", "yes"].includes(mode)) return true;
+    if (["0", "false", "no"].includes(mode)) return false;
+    return (
+      !this.configValue("DIGISEVA_API_KEY", "DIGISEVA_CLIENT_ID") ||
+      !this.configValue(
+        "DIGISEVA_USERCODE",
+        "DIGISEVA_POS_ID",
+        "DIGISEVA_CLIENT_SECRET",
+      )
+    );
+  }
+
+  private configValue(...keys: string[]) {
+    for (const key of keys) {
+      const value = this.config.get<string>(key)?.trim();
+      if (
+        value &&
+        !["replace", "your_api_key", "your_pos_id"].includes(
+          value.toLowerCase(),
+        )
+      ) {
+        return value;
+      }
+    }
+    return "";
   }
 }

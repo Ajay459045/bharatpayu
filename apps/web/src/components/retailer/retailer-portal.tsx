@@ -30,7 +30,7 @@ import { io } from "socket.io-client";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { api } from "@/lib/api";
+import { api, getApiOrigin } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 
 type RetailerOverview = {
@@ -148,8 +148,7 @@ export function RetailerPortal() {
   });
 
   useEffect(() => {
-    const baseUrl = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1").replace(/\/api\/v1$/, "");
-    const socket = io(`${baseUrl}/admin`, { transports: ["websocket"], reconnectionAttempts: 3 });
+    const socket = io(`${getApiOrigin()}/admin`, { transports: ["websocket"], reconnectionAttempts: 3 });
     socket.on("connect", () => setLiveStatus("Live"));
     socket.on("disconnect", () => setLiveStatus("Polling"));
     socket.on("admin:transactions", () => refetch());

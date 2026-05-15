@@ -65,7 +65,7 @@ import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/api";
+import { api, getApiOrigin } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 
 type AdminOverview = {
@@ -645,10 +645,7 @@ export function AdminDashboard() {
   const data = useMemo(() => withDemoFloor(rawData), [rawData]);
 
   useEffect(() => {
-    const baseUrl = (
-      process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1"
-    ).replace(/\/api\/v1$/, "");
-    const socket = io(`${baseUrl}/admin`, {
+    const socket = io(`${getApiOrigin()}/admin`, {
       transports: ["websocket"],
       reconnectionAttempts: 5,
     });

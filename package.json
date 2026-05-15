@@ -1,0 +1,24 @@
+{
+  "name": "bharatpayu",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "npm@11.9.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @bharatpayu/web",
+    "dev:api": "npm run dev --workspace @bharatpayu/api",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "format": "prettier --write .",
+    "docker:up": "docker compose up --build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.18",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3"
+  }
+}

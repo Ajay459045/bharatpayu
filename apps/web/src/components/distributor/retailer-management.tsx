@@ -213,7 +213,17 @@ export function DistributorRetailerAddPage() {
   const [challengeId, setChallengeId] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const steps = ["Basic", "Address", "KYC", "Location", "OTP"];
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = window.setTimeout(
+      () => setResendCooldown((value) => Math.max(0, value - 1)),
+      1000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [resendCooldown]);
 
   function update(key: string, value: any) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -349,6 +359,7 @@ export function DistributorRetailerAddPage() {
       const { data } = await api.post("/distributor/retailers/otp", form);
       setChallengeId(data.challengeId);
       setStep(4);
+      setResendCooldown(45);
       setStatus(
         data.devOtp
           ? `Testing OTP: ${data.devOtp}`
@@ -550,9 +561,21 @@ export function DistributorRetailerAddPage() {
                   placeholder="Email OTP"
                   value={otp}
                 />
-                <Button disabled={busy || !otp || !challengeId} type="submit">
-                  <CheckCircle2 size={16} /> Verify OTP & Create Retailer
-                </Button>
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <Button disabled={busy || !otp || !challengeId} type="submit">
+                    <CheckCircle2 size={16} /> Verify OTP & Create Retailer
+                  </Button>
+                  <Button
+                    disabled={busy || resendCooldown > 0}
+                    onClick={sendOtp}
+                    type="button"
+                    variant="secondary"
+                  >
+                    {resendCooldown > 0
+                      ? `Resend in ${resendCooldown}s`
+                      : "Resend OTP"}
+                  </Button>
+                </div>
               </div>
             )}
             <div className="flex flex-wrap gap-2">

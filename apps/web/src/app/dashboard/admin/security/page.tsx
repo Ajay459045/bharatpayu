@@ -1,0 +1,7 @@
+import { ChangePasswordPanel } from "@/components/change-password-panel";
+
+export default function Page() {
+  return (
+    <ChangePasswordPanel backHref="/dashboard/admin" title="Admin password" />
+  );
+}

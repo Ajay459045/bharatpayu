@@ -50,6 +50,11 @@ const navItems = [
     href: "/dashboard/distributor",
     Icon: BadgeIndianRupee,
   },
+  {
+    label: "Security",
+    href: "/dashboard/distributor/security",
+    Icon: Settings,
+  },
 ];
 
 export function DistributorPortal() {

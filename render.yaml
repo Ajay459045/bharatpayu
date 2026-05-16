@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: bharatpayu-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build --workspace @bharatpayu/api && test -f apps/api/dist/main.js
+    startCommand: npm run start --workspace @bharatpayu/api
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production

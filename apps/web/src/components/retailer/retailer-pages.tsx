@@ -804,6 +804,14 @@ export function RetailerSecurityPage() {
   });
   return (
     <PageShell title="Security Center" eyebrow="Device IP session logs">
+      <div className="mb-5">
+        <a
+          className="inline-flex h-11 items-center justify-center rounded-md bg-[#0b5cff] px-4 text-sm font-semibold text-white"
+          href="/dashboard/retailer/change-password"
+        >
+          Change Password
+        </a>
+      </div>
       <div className="grid gap-5 xl:grid-cols-2">
         <RecordsTable
           title="Device history"

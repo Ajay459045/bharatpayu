@@ -223,7 +223,11 @@ const sidebar: Array<{
   {
     section: "Security",
     items: ["Login Logs", "Device Logs", "IP Logs", "Activity Logs"].map(
-      (label) => ({ label, Icon: LockKeyhole }),
+      (label) => ({
+        label,
+        Icon: LockKeyhole,
+        href: label === "Login Logs" ? "/dashboard/admin/security" : undefined,
+      }),
     ),
   },
   {

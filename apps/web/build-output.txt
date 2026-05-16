@@ -1,0 +1,18 @@
+
+> @bharatpayu/web@1.0.0 prebuild
+> npm run check:api-url
+
+
+> @bharatpayu/web@1.0.0 check:api-url
+> node scripts/check-production-api-url.js
+
+
+> @bharatpayu/web@1.0.0 build
+> next build
+
+   ▲ Next.js 15.5.18
+   - Environments: .env.local
+   - Experiments (use with caution):
+     · optimizePackageImports
+
+   Creating an optimized production build ...

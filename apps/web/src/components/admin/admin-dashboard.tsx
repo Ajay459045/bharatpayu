@@ -154,7 +154,11 @@ const sidebar: Array<{
         label,
         Icon: Building2,
         href:
-          label === "All Distributors" ? "/dashboard/admin/users" : undefined,
+          label === "All Distributors"
+            ? "/dashboard/admin/users"
+            : label === "Earnings"
+              ? "/dashboard/admin/distributors/earnings"
+              : "/dashboard/admin/distributors/wallet-management",
       }),
     ),
   },
@@ -164,7 +168,10 @@ const sidebar: Array<{
       (label) => ({
         label,
         Icon: ReceiptText,
-        href: label === "Pending" ? "/dashboard/admin/settlements" : undefined,
+        href:
+          label === "All Transactions"
+            ? "/dashboard/admin/transactions"
+            : `/dashboard/admin/transactions/${label.toLowerCase()}`,
       }),
     ),
   },
@@ -173,6 +180,7 @@ const sidebar: Array<{
     items: ["Electricity", "Water", "LPG", "Gas", "Insurance"].map((label) => ({
       label,
       Icon: Zap,
+      href: `/dashboard/admin/services/${label.toLowerCase()}`,
     })),
   },
   {
@@ -246,12 +254,12 @@ const sidebar: Array<{
 ];
 
 const quickActions = [
-  "Add Retailer",
-  "Add Distributor",
-  "Topup Wallet",
-  "Export Reports",
-  "Send Notification",
-  "Configure Commission",
+  { label: "Add Retailer", href: "/dashboard/admin/users/add-retailer" },
+  { label: "Add Distributor", href: "/dashboard/admin/users/add-distributor" },
+  { label: "Topup Wallet", href: "/dashboard/admin/wallet-adjustments" },
+  { label: "Export Reports", href: "/dashboard/admin/transactions" },
+  { label: "Send Notification", href: "/dashboard/admin/settings" },
+  { label: "Configure Commission", href: "/dashboard/admin/commission" },
 ];
 
 const fallback: AdminOverview = {
@@ -646,6 +654,7 @@ function TransactionTable({ rows }: { rows: TransactionRow[] }) {
 export function AdminDashboard() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [socketStatus, setSocketStatus] = useState<
     "connecting" | "online" | "offline"
   >("connecting");
@@ -657,6 +666,10 @@ export function AdminDashboard() {
     retry: 1,
   });
   const data = useMemo(() => withDemoFloor(rawData), [rawData]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const socket = io(`${getApiOrigin()}/admin`, {
@@ -767,7 +780,11 @@ export function AdminDashboard() {
               className="h-10 w-10 px-0"
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             >
-              {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+              {mounted && theme === "dark" ? (
+                <Sun size={17} />
+              ) : (
+                <Moon size={17} />
+              )}
             </Button>
           </div>
         </header>
@@ -789,9 +806,9 @@ export function AdminDashboard() {
             </div>
             <div className="grid grid-cols-2 gap-2 sm:flex">
               {quickActions.slice(0, 4).map((action) => (
-                <Button key={action} variant="secondary">
-                  {action}
-                </Button>
+                <Link key={action.label} href={action.href as "/dashboard/admin"}>
+                  <Button variant="secondary">{action.label}</Button>
+                </Link>
               ))}
             </div>
           </div>
@@ -1022,9 +1039,9 @@ export function AdminDashboard() {
             <Card>
               <h2 className="text-xl font-bold">Recent activity</h2>
               <div className="mt-4 grid gap-3">
-                {data.activities.map((item) => (
+                {data.activities.map((item, index) => (
                   <div
-                    key={item.title}
+                    key={`${item.title}-${item.detail}-${index}`}
                     className="rounded-md border border-white/10 bg-white/5 p-3"
                   >
                     <p className="font-semibold">{item.title}</p>
@@ -1037,9 +1054,9 @@ export function AdminDashboard() {
             <Card>
               <h2 className="text-xl font-bold">Wallet alerts</h2>
               <div className="mt-4 grid gap-3">
-                {data.walletAlerts.map((item) => (
+                {data.walletAlerts.map((item, index) => (
                   <div
-                    key={item.title}
+                    key={`${item.title}-${item.detail}-${index}`}
                     className="rounded-md border border-orange-300/20 bg-orange-400/10 p-3"
                   >
                     <AlertTriangle className="mb-2 text-orange-200" size={18} />

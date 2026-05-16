@@ -10,8 +10,9 @@ import { formatCurrency } from "@/lib/utils";
 
 export default function AdminSettlementsPage() {
   const [requests, setRequests] = useState<any[]>([]);
-  const [bbpsReferenceId, setBbpsReferenceId] = useState("");
-  const [notes, setNotes] = useState("");
+  const [approvalInputs, setApprovalInputs] = useState<
+    Record<string, { bbpsReferenceId: string; notes: string }>
+  >({});
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -37,16 +38,34 @@ export default function AdminSettlementsPage() {
   }
 
   async function action(id: string, type: "approve" | "reject" | "hold") {
+    const input = approvalInputs[id] ?? { bbpsReferenceId: "", notes: "" };
+    if (type === "approve" && !input.bbpsReferenceId.trim()) {
+      setError(
+        "Enter provider transaction ID / BBPS reference ID before approval.",
+      );
+      return;
+    }
     const payload =
       type === "approve"
-        ? { bbpsReferenceId, notes }
+        ? { bbpsReferenceId: input.bbpsReferenceId.trim(), notes: input.notes }
         : type === "reject"
-          ? { rejectionReason: notes }
-          : { notes };
-    await api.patch(`/admin/settlements/${id}/${type}`, payload);
-    setBbpsReferenceId("");
-    setNotes("");
-    await load();
+          ? { rejectionReason: input.notes }
+          : { notes: input.notes };
+    try {
+      setError("");
+      await api.patch(`/admin/settlements/${id}/${type}`, payload);
+      setApprovalInputs((current) => ({
+        ...current,
+        [id]: { bbpsReferenceId: "", notes: "" },
+      }));
+      await load();
+    } catch (requestError: any) {
+      setError(
+        requestError?.response?.data?.error?.message ??
+          requestError?.message ??
+          "Settlement action failed.",
+      );
+    }
   }
 
   function exportCsv() {
@@ -143,14 +162,31 @@ export default function AdminSettlementsPage() {
               </section>
               <section className="grid gap-3">
                 <Input
-                  placeholder="BBPS reference ID for approval"
-                  value={bbpsReferenceId}
-                  onChange={(event) => setBbpsReferenceId(event.target.value)}
+                  placeholder="Provider transaction ID / BBPS reference ID"
+                  value={approvalInputs[request._id]?.bbpsReferenceId ?? ""}
+                  onChange={(event) =>
+                    setApprovalInputs((current) => ({
+                      ...current,
+                      [request._id]: {
+                        bbpsReferenceId: event.target.value,
+                        notes: current[request._id]?.notes ?? "",
+                      },
+                    }))
+                  }
                 />
                 <Input
                   placeholder="Notes / rejection reason"
-                  value={notes}
-                  onChange={(event) => setNotes(event.target.value)}
+                  value={approvalInputs[request._id]?.notes ?? ""}
+                  onChange={(event) =>
+                    setApprovalInputs((current) => ({
+                      ...current,
+                      [request._id]: {
+                        bbpsReferenceId:
+                          current[request._id]?.bbpsReferenceId ?? "",
+                        notes: event.target.value,
+                      },
+                    }))
+                  }
                 />
                 <div className="flex flex-wrap gap-2">
                   <Button

@@ -79,6 +79,34 @@ export class User {
   @Prop({ default: true })
   loginOtpEnabled!: boolean;
 
+  @Prop({ default: false, index: true })
+  twoFactorEnabled!: boolean;
+
+  @Prop()
+  twoFactorSecret?: string;
+
+  @Prop({
+    type: [
+      {
+        codeHash: String,
+        usedAt: Date,
+        createdAt: Date,
+      },
+    ],
+    default: [],
+  })
+  backupCodes!: Array<{
+    codeHash: string;
+    usedAt?: Date;
+    createdAt?: Date;
+  }>;
+
+  @Prop()
+  twoFactorVerifiedAt?: Date;
+
+  @Prop()
+  lastTotpStep?: number;
+
   @Prop({
     type: {
       state: String,

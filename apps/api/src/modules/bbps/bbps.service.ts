@@ -126,6 +126,10 @@ export class BbpsService {
   }
 
   async billers(categoryKey: string, forceSync = false) {
+    if (!categoryKey?.trim()) {
+      throw new BadRequestException("categoryKey is required");
+    }
+    await this.removeDemoBillers(categoryKey);
     const cached = await this.billerModel
       .find({
         categoryKey,
@@ -403,6 +407,12 @@ export class BbpsService {
     id: string,
     input: { bbpsReferenceId?: string; notes?: string; reviewerId?: string },
   ) {
+    const bbpsReferenceId = input.bbpsReferenceId?.trim();
+    if (!bbpsReferenceId) {
+      throw new BadRequestException(
+        "Provider transaction ID / BBPS reference ID is required before approval",
+      );
+    }
     const session = await this.connection.startSession();
     session.startTransaction();
     try {
@@ -486,7 +496,7 @@ export class BbpsService {
         );
       }
       txn.settlementStatus = "final_success";
-      txn.bbpsReferenceId = input.bbpsReferenceId;
+      txn.bbpsReferenceId = bbpsReferenceId;
       txn.settlementNotes = input.notes;
       txn.settledAt = new Date();
       txn.retailerCommission = commission.retailerCommission;
@@ -494,7 +504,7 @@ export class BbpsService {
       txn.tdsAmount = retailerTds.tdsAmount;
       await txn.save({ session });
       settlement.status = "final_success";
-      settlement.bbpsReferenceId = input.bbpsReferenceId;
+      settlement.bbpsReferenceId = bbpsReferenceId;
       settlement.notes = input.notes;
       settlement.reviewedBy = input.reviewerId
         ? new Types.ObjectId(input.reviewerId)
@@ -801,6 +811,20 @@ export class BbpsService {
     return digits ? digits.slice(0, 10) : undefined;
   }
 
+  private async removeDemoBillers(categoryKey: string) {
+    await this.billerModel.deleteMany({
+      categoryKey,
+      $or: [
+        { billerName: /demo operator/i },
+        { billerId: new RegExp(`^${this.escapeRegExp(categoryKey)}BILLER`, "i") },
+      ],
+    });
+  }
+
+  private escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
   private extractRows(payload: any, keys: string[]): any[] {
     if (Array.isArray(payload)) return payload;
     if (!payload || typeof payload !== "object") return [];
@@ -994,13 +1018,16 @@ export class BbpsService {
   private retailerReceipt(txn: any) {
     return {
       status: "SUCCESS",
-      message: "Processing by BharatPayU",
+      message: "Payment successful. Pending admin settlement approval.",
       transactionId: txn.transactionId,
+      bbpsReferenceId: txn.bbpsReferenceId,
       amount: txn.amount,
       service: txn.serviceCategory,
       operator: txn.operator,
       customerName: txn.customerName,
       consumerNumber: txn.consumerNumber,
+      billNumber: txn.billNumber,
+      dueDate: txn.dueDate,
       settlementStatus: txn.settlementStatus,
       time: txn.createdAt ?? new Date(),
     };

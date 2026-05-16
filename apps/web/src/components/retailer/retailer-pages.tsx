@@ -27,6 +27,7 @@ import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { TwoFactorSecurityPanel } from "@/components/two-factor-security-panel";
 import { api } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 
@@ -589,12 +590,28 @@ export function RetailerTransactionDetailPage({
       )}
       {txn && (
         <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-          <Card>
-            <ReceiptText className="mb-4 text-blue-300" />
-            <h2 className="text-2xl font-bold">Premium receipt</h2>
+          <Card id="retailer-print-receipt">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 pb-4">
+              <div className="flex items-center gap-3">
+                <img
+                  src="/brand/bharatpayu-logo.png"
+                  alt="BharatPayU"
+                  className="h-14 w-14 rounded-md bg-white object-contain p-1"
+                />
+                <div>
+                  <h2 className="text-2xl font-bold">BharatPayU Receipt</h2>
+                  <p className="text-sm text-slate-400">
+                    Professional BBPS payment receipt
+                  </p>
+                </div>
+              </div>
+              <ReceiptText className="text-blue-300" />
+            </div>
             <div className="mt-5 grid gap-3 text-sm">
               {[
                 "transactionId",
+                "bbpsReferenceId",
+                "settlementStatus",
                 "customerName",
                 "serviceCategory",
                 "operator",
@@ -602,23 +619,63 @@ export function RetailerTransactionDetailPage({
                 "billNumber",
                 "amount",
                 "status",
+                "settledAt",
               ].map((key) => (
                 <p
                   key={key}
                   className="flex justify-between gap-4 rounded-md bg-white/5 p-3"
                 >
                   <span className="capitalize text-slate-400">{key}</span>
-                  <b>
+                  <b className="text-right">
                     {key === "amount"
                       ? formatCurrency(Number(txn[key] ?? 0))
+                      : key === "bbpsReferenceId" && !txn[key]
+                        ? "Pending admin approval"
+                        : key === "settledAt" && txn[key]
+                          ? new Date(txn[key]).toLocaleString("en-IN")
                       : String(txn[key] ?? "-")}
                   </b>
                 </p>
               ))}
             </div>
-            <Button className="mt-5" onClick={() => window.print()}>
+            <Button
+              className="no-print mt-5"
+              onClick={() => window.print()}
+            >
               <Download size={16} /> Print Receipt
             </Button>
+            <style jsx global>{`
+              @media print {
+                body * {
+                  visibility: hidden !important;
+                }
+
+                #retailer-print-receipt,
+                #retailer-print-receipt * {
+                  visibility: visible !important;
+                }
+
+                #retailer-print-receipt {
+                  position: absolute !important;
+                  inset: 0 auto auto 0 !important;
+                  width: 100% !important;
+                  border: 0 !important;
+                  border-radius: 0 !important;
+                  box-shadow: none !important;
+                  color: #0f172a !important;
+                  background: white !important;
+                }
+
+                #retailer-print-receipt p {
+                  border: 1px solid #e2e8f0 !important;
+                  background: #f8fafc !important;
+                }
+
+                .no-print {
+                  display: none !important;
+                }
+              }
+            `}</style>
           </Card>
           <div className="grid gap-5">
             <RecordsTable
@@ -811,6 +868,9 @@ export function RetailerSecurityPage() {
         >
           Change Password
         </a>
+      </div>
+      <div className="mb-5">
+        <TwoFactorSecurityPanel />
       </div>
       <div className="grid gap-5 xl:grid-cols-2">
         <RecordsTable

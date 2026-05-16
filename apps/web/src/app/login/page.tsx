@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { motion } from "framer-motion";
+import QRCode from "react-qr-code";
 import {
   Eye,
   Fingerprint,
@@ -20,13 +21,21 @@ import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth-store";
 
 type LoginStep = "password" | "otp" | "forgot" | "reset";
+type ExtendedLoginStep = LoginStep | "twoFactor" | "twoFactorSetup";
 
 export default function LoginPage() {
-  const [step, setStep] = useState<LoginStep>("password");
+  const [step, setStep] = useState<ExtendedLoginStep>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
+  const [totp, setTotp] = useState("");
   const [challengeId, setChallengeId] = useState("");
+  const [challengeToken, setChallengeToken] = useState("");
+  const [setupToken, setSetupToken] = useState("");
+  const [setupChallengeId, setSetupChallengeId] = useState("");
+  const [otpauthUrl, setOtpauthUrl] = useState("");
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  const [finalDashboardHref, setFinalDashboardHref] = useState("/dashboard/admin");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
@@ -76,6 +85,7 @@ export default function LoginPage() {
         setMessage("Email OTP sent. Verify to continue.");
         return;
       }
+      if (await handleTwoFactorGate(data)) return;
       setSession(
         data.user.role,
         data.user.email,
@@ -105,6 +115,7 @@ export default function LoginPage() {
         challengeId,
         device: await getDeviceContext(),
       });
+      if (await handleTwoFactorGate(data)) return;
       setSession(
         data.user.role,
         data.user.email,
@@ -118,6 +129,89 @@ export default function LoginPage() {
           error?.response?.data?.error ??
           error?.message ??
           "OTP verification failed.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleTwoFactorGate(data: any) {
+    if (data.requiresTwoFactor) {
+      setChallengeToken(data.challengeToken);
+      setTotp("");
+      setStep("twoFactor");
+      setMessage(data.message ?? "Enter your authenticator code.");
+      return true;
+    }
+    if (data.requiresTwoFactorSetup) {
+      setSetupToken(data.setupToken);
+      setStep("twoFactorSetup");
+      setMessage(data.message ?? "Set up authenticator 2FA to continue.");
+      const setup = await api.post("/auth/2fa/setup", {
+        setupToken: data.setupToken,
+      });
+      setSetupChallengeId(setup.data.setupChallengeId);
+      setOtpauthUrl(setup.data.otpauthUrl);
+      return true;
+    }
+    return false;
+  }
+
+  async function submitTwoFactor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    try {
+      const { data } = await api.post("/auth/2fa/verify-login", {
+        challengeToken,
+        code: totp,
+        device: await getDeviceContext(),
+      });
+      setSession(
+        data.user.role,
+        data.user.email,
+        data.accessToken,
+        data.user.approvalStatus,
+      );
+      window.location.href = `/dashboard/${data.user.role === "retailer" ? "retailer" : data.user.role === "distributor" ? "distributor" : "admin"}`;
+    } catch (error: any) {
+      setMessage(
+        error?.response?.data?.error?.message ??
+          error?.response?.data?.error ??
+          error?.message ??
+          "2FA verification failed.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitTwoFactorSetup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    try {
+      const { data } = await api.post("/auth/2fa/enable", {
+        setupToken,
+        setupChallengeId,
+        code: totp,
+        device: await getDeviceContext(),
+      });
+      setBackupCodes(data.backupCodes ?? []);
+      setSession(
+        data.user.role,
+        data.user.email,
+        data.accessToken,
+        data.user.approvalStatus,
+      );
+      setFinalDashboardHref(
+        `/dashboard/${data.user.role === "retailer" ? "retailer" : data.user.role === "distributor" ? "distributor" : "admin"}`,
+      );
+      setMessage("2FA enabled. Save your backup codes before continuing.");
+    } catch (error: any) {
+      setMessage(
+        error?.response?.data?.error?.message ??
+          error?.response?.data?.error ??
+          error?.message ??
+          "Could not enable 2FA.",
       );
     } finally {
       setLoading(false);
@@ -249,6 +343,10 @@ export default function LoginPage() {
                 ? "Login securely"
                 : step === "otp"
                   ? "Verify email OTP"
+                  : step === "twoFactor"
+                    ? "Verify authenticator"
+                    : step === "twoFactorSetup"
+                      ? "Set up 2FA"
                   : step === "forgot"
                     ? "Reset password"
                     : "Verify reset OTP"}
@@ -258,6 +356,10 @@ export default function LoginPage() {
                 ? "Use your registered email and password."
                 : step === "otp"
                   ? "Enter the 6 digit code sent to your email."
+                  : step === "twoFactor"
+                    ? "Enter your Google Authenticator, Microsoft Authenticator, Authy, or backup code."
+                    : step === "twoFactorSetup"
+                      ? "Scan the QR code and enter the 6 digit authenticator code."
                   : step === "forgot"
                     ? "Enter your email to receive a reset OTP."
                     : "Enter OTP and create a new password."}
@@ -319,6 +421,76 @@ export default function LoginPage() {
                 <Fingerprint size={16} />{" "}
                 {loading ? "Verifying..." : "Verify OTP"}
               </Button>
+            </form>
+          ) : step === "twoFactor" ? (
+            <form className="grid gap-4" onSubmit={submitTwoFactor}>
+              <label className="grid gap-2 text-sm text-slate-300">
+                Authenticator or Backup Code
+                <Input
+                  inputMode="numeric"
+                  value={totp}
+                  onChange={(event) => setTotp(event.target.value)}
+                  required
+                  placeholder="123456 or XXXXX-XXXXX"
+                />
+              </label>
+              <Button type="submit" disabled={loading}>
+                <Fingerprint size={16} />{" "}
+                {loading ? "Verifying..." : "Verify 2FA"}
+              </Button>
+            </form>
+          ) : step === "twoFactorSetup" ? (
+            <form className="grid gap-4" onSubmit={submitTwoFactorSetup}>
+              {otpauthUrl && backupCodes.length === 0 && (
+                <div className="rounded-md bg-white p-4">
+                  <QRCode value={otpauthUrl} className="h-auto w-full" />
+                </div>
+              )}
+              {backupCodes.length > 0 ? (
+                <div className="rounded-md border border-green-300/20 bg-green-500/10 p-4">
+                  <p className="font-semibold text-green-100">
+                    Backup codes
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                    {backupCodes.map((code) => (
+                      <code
+                        className="rounded bg-slate-950/80 px-2 py-1 text-blue-100"
+                        key={code}
+                      >
+                        {code}
+                      </code>
+                    ))}
+                  </div>
+                  <Button
+                    className="mt-4 w-full"
+                    type="button"
+                    onClick={() => {
+                      window.location.href = finalDashboardHref;
+                    }}
+                  >
+                    Continue
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <label className="grid gap-2 text-sm text-slate-300">
+                    Authenticator Code
+                    <Input
+                      inputMode="numeric"
+                      minLength={6}
+                      maxLength={6}
+                      value={totp}
+                      onChange={(event) => setTotp(event.target.value)}
+                      required
+                      placeholder="123456"
+                    />
+                  </label>
+                  <Button type="submit" disabled={loading || !setupChallengeId}>
+                    <Fingerprint size={16} />{" "}
+                    {loading ? "Enabling..." : "Enable 2FA & Login"}
+                  </Button>
+                </>
+              )}
             </form>
           ) : step === "forgot" ? (
             <form className="grid gap-4" onSubmit={requestPasswordOtp}>

@@ -200,6 +200,75 @@ export class UsersService {
     return user;
   }
 
+  async createAdminUser(input: {
+    role: "retailer" | "distributor";
+    createdById?: string;
+    fullName: string;
+    businessName: string;
+    mobile: string;
+    email: string;
+    passwordHash: string;
+    state?: string;
+    district?: string;
+    fullAddress?: string;
+    pincode?: string;
+    distributorId?: string;
+    autoApprove?: boolean;
+  }) {
+    const [existingEmail, existingMobile] = await Promise.all([
+      this.findByEmail(input.email),
+      this.findByMobile(input.mobile),
+    ]);
+    if (existingEmail)
+      throw new BadRequestException("Email is already registered");
+    if (existingMobile)
+      throw new BadRequestException("Mobile number is already registered");
+
+    const autoApprove = input.autoApprove !== false;
+    const user = await this.userModel.create({
+      name: input.fullName,
+      businessName: input.businessName,
+      mobile: input.mobile,
+      email: input.email.toLowerCase(),
+      retailerCode: await this.generateRetailerCode(),
+      passwordHash: input.passwordHash,
+      role: input.role,
+      distributorId:
+        input.role === "retailer" && input.distributorId
+          ? new Types.ObjectId(input.distributorId)
+          : undefined,
+      createdById: input.createdById
+        ? new Types.ObjectId(input.createdById)
+        : undefined,
+      createdBy: "admin",
+      approvalStatus: autoApprove ? "approved" : "pending",
+      emailVerified: true,
+      kycStatus: autoApprove ? "verified" : "submitted",
+      loginOtpEnabled: false,
+      isActive: true,
+      address: {
+        state: input.state ?? "",
+        district: input.district ?? "",
+        fullAddress: input.fullAddress ?? "",
+        pincode: input.pincode ?? "",
+      },
+      kyc: {
+        submittedAt: new Date(),
+        documents: {},
+        location: {},
+      },
+      serviceAccess: {
+        electricity: true,
+        water: true,
+        lpg: true,
+        gas: true,
+        insurance: true,
+      },
+    });
+
+    return user;
+  }
+
   async markEmailVerified(userId: string) {
     return this.userModel.findByIdAndUpdate(
       userId,

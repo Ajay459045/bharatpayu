@@ -1,9 +1,11 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
   Param,
   Patch,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -167,6 +169,46 @@ class AdminUserUpdateDto {
   @IsOptional()
   @IsString()
   pincode?: string;
+}
+
+class AdminCreateUserDto {
+  @IsIn(["retailer", "distributor"])
+  role!: "retailer" | "distributor";
+
+  @IsString()
+  fullName!: string;
+
+  @IsString()
+  businessName!: string;
+
+  @IsString()
+  mobile!: string;
+
+  @IsString()
+  email!: string;
+
+  @IsString()
+  password!: string;
+
+  @IsOptional()
+  @IsString()
+  state?: string;
+
+  @IsOptional()
+  @IsString()
+  district?: string;
+
+  @IsOptional()
+  @IsString()
+  fullAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  pincode?: string;
+
+  @IsOptional()
+  @IsString()
+  distributorId?: string;
 }
 
 class AdminUserStatusDto {
@@ -703,6 +745,12 @@ export class AdminController {
     @Body() dto: SettlementActionDto,
     @Req() req?: { user?: { id?: string } },
   ) {
+    const bbpsReferenceId = dto.bbpsReferenceId?.trim();
+    if (!bbpsReferenceId) {
+      throw new BadRequestException(
+        "Provider transaction ID / BBPS reference ID is required before approval",
+      );
+    }
     const request = await this.settlementModel.findById(id);
     if (!request) return { request: null };
     const txn = await this.transactionModel.findOne({
@@ -770,7 +818,7 @@ export class AdminController {
         });
       }
       txn.settlementStatus = "final_success";
-      txn.bbpsReferenceId = dto.bbpsReferenceId;
+      txn.bbpsReferenceId = bbpsReferenceId;
       txn.settlementNotes = dto.notes;
       txn.settledAt = new Date();
       txn.retailerCommission = commission.retailerCommission;
@@ -778,7 +826,7 @@ export class AdminController {
       txn.tdsAmount = retailerTds.tdsAmount;
       await txn.save();
       request.status = "final_success";
-      request.bbpsReferenceId = dto.bbpsReferenceId;
+      request.bbpsReferenceId = bbpsReferenceId;
       request.notes = dto.notes;
       request.reviewedBy = req?.user?.id
         ? new Types.ObjectId(req.user.id)
@@ -893,6 +941,113 @@ export class AdminController {
       .limit(1000)
       .lean();
     return { users };
+  }
+
+  @Roles("super_admin", "admin")
+  @Patch("users")
+  async createAdminUser(
+    @Body() dto: AdminCreateUserDto,
+    @Req() req?: { user?: { id?: string }; ip?: string },
+  ) {
+    const user = await this.users.createAdminUser({
+      ...dto,
+      createdById: req?.user?.id,
+      passwordHash: await bcrypt.hash(dto.password, 12),
+      autoApprove: true,
+    });
+    await Promise.all([
+      this.wallets.ensureWallet(new Types.ObjectId(String(user._id)), "main"),
+      this.wallets.ensureWallet(
+        new Types.ObjectId(String(user._id)),
+        "commission",
+      ),
+      this.activityLogModel.create({
+        actorId: req?.user?.id ? new Types.ObjectId(req.user.id) : undefined,
+        userId: new Types.ObjectId(String(user._id)),
+        action: `admin.${dto.role}.created`,
+        ipAddress: req?.ip,
+        metadata: { userId: String(user._id), email: user.email },
+      }),
+    ]);
+    const safeUser = user.toObject();
+    delete safeUser.passwordHash;
+    return { user: safeUser };
+  }
+
+  @Roles("super_admin", "admin")
+  @Get("transactions")
+  async adminTransactions(
+    @Query("status") status?: string,
+    @Query("role") role?: string,
+    @Query("service") service?: string,
+  ) {
+    const filter: Record<string, unknown> = {};
+    if (status && status !== "all") {
+      filter.$or =
+        status === "pending"
+          ? [
+              { status: "pending" },
+              { settlementStatus: "pending_approval" },
+              { settlementStatus: "hold" },
+            ]
+          : [{ status }];
+    }
+    if (service) {
+      filter.serviceCategory = new RegExp(service.replace(/-/g, " "), "i");
+    }
+
+    const transactions = await this.transactionModel
+      .find(filter)
+      .populate("retailerId", "name businessName mobile email retailerCode")
+      .populate("distributorId", "name businessName mobile email distributorCode")
+      .sort({ createdAt: -1 })
+      .limit(1000)
+      .lean();
+
+    const filtered =
+      role === "distributor"
+        ? transactions.filter((txn: any) => txn.distributorId)
+        : transactions;
+    const totalAmount = filtered.reduce(
+      (sum: number, txn: any) => sum + Number(txn.amount ?? 0),
+      0,
+    );
+    const totalCommission = filtered.reduce(
+      (sum: number, txn: any) =>
+        sum +
+        Number(txn.retailerCommission ?? 0) +
+        Number(txn.distributorCommission ?? 0),
+      0,
+    );
+
+    return {
+      transactions: filtered.map((txn: any) => ({
+        id: txn.transactionId,
+        retailer:
+          txn.retailerId?.businessName ??
+          txn.retailerId?.name ??
+          "Retailer",
+        distributor:
+          txn.distributorId?.businessName ??
+          txn.distributorId?.name ??
+          "",
+        service: txn.serviceCategory,
+        operator: txn.operator,
+        amount: Number(txn.amount ?? 0),
+        retailerCommission: Number(txn.retailerCommission ?? 0),
+        distributorCommission: Number(txn.distributorCommission ?? 0),
+        status: txn.status,
+        settlementStatus: txn.settlementStatus,
+        billNumber: txn.billNumber,
+        consumerNumber: txn.consumerNumber,
+        time: new Date(txn.createdAt ?? Date.now()).toLocaleString("en-IN"),
+      })),
+      summary: {
+        count: filtered.length,
+        totalAmount,
+        totalCommission,
+      },
+    };
   }
 
   @Roles("super_admin", "admin")

@@ -28,8 +28,19 @@ export class BbpsController {
   }
 
   @Get("billers")
-  billers(@Query("categoryKey") categoryKey: string) {
-    return this.bbps.billers(categoryKey);
+  billers(
+    @Query("categoryKey") categoryKey: string,
+    @Query("sync") sync?: string,
+  ) {
+    return this.bbps.billers(categoryKey, sync === "true" || sync === "1");
+  }
+
+  @Get("operators")
+  operators(
+    @Query("categoryKey") categoryKey: string,
+    @Query("sync") sync?: string,
+  ) {
+    return this.bbps.billers(categoryKey, sync === "true" || sync === "1");
   }
 
   @Get("biller-details")

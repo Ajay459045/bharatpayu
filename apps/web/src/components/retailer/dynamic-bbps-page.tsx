@@ -3,7 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Search, WalletCards, Zap } from "lucide-react";
+import {
+  CheckCircle2,
+  Download,
+  Search,
+  WalletCards,
+  Zap,
+} from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -35,6 +41,69 @@ const serviceCategories: Record<string, { title: string; aliases: string[] }> =
     },
   };
 
+type BbpsInputField = {
+  name: string;
+  desc: string;
+  regex?: string;
+  mandatory: boolean;
+};
+
+const fallbackFieldByService: Record<string, Omit<BbpsInputField, "mandatory">> = {
+  electricity: { name: "param1", desc: "K Number" },
+  water: { name: "param1", desc: "Consumer Number" },
+  insurance: { name: "param1", desc: "Policy Number" },
+  gas: { name: "param1", desc: "Consumer Number" },
+  lpg: { name: "param1", desc: "LPG ID / Consumer Number" },
+};
+
+function isMandatory(parameter: any) {
+  return (
+    Number(parameter?.mandatory ?? parameter?.isMandatory ?? 0) === 1 ||
+    parameter?.required === true
+  );
+}
+
+function normalizeParameters(parameters: any[], key: string): BbpsInputField[] {
+  const normalized = parameters
+    .map((parameter, index) => ({
+      name:
+        String(
+          parameter?.name ??
+            parameter?.paramName ??
+            parameter?.parameterName ??
+            `param${index + 1}`,
+        ).trim() || `param${index + 1}`,
+      desc:
+        String(
+          parameter?.desc ??
+            parameter?.description ??
+            parameter?.displayName ??
+            parameter?.label ??
+            parameter?.name ??
+            `Field ${index + 1}`,
+        ).trim() || `Field ${index + 1}`,
+      regex: parameter?.regex ?? parameter?.pattern ?? parameter?.regEx,
+      mandatory: isMandatory(parameter),
+    }))
+    .filter((parameter) => parameter.name);
+
+  return normalized.length
+    ? normalized
+    : [
+        {
+          ...(fallbackFieldByService[key] ?? fallbackFieldByService.water),
+          mandatory: true,
+        },
+      ];
+}
+
+function settlementLabel(status?: string) {
+  if (status === "final_success") return "Approved by admin";
+  if (status === "hold") return "On hold";
+  if (status === "rejected") return "Rejected / refunded";
+  return "Pending admin approval";
+}
+
 export function DynamicBbpsPage({
   initialCategoryKey = "",
   serviceKey = "",
@@ -44,7 +113,7 @@ export function DynamicBbpsPage({
 }) {
   const [categoryKey, setCategoryKey] = useState(initialCategoryKey);
   const [billerId, setBillerId] = useState("");
-  const [consumerNumber, setConsumerNumber] = useState("");
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [bill, setBill] = useState<any>(null);
   const [receipt, setReceipt] = useState<any>(null);
   const [status, setStatus] = useState("");
@@ -78,19 +147,30 @@ export function DynamicBbpsPage({
     if (nextCategoryKey && nextCategoryKey !== categoryKey) {
       setCategoryKey(nextCategoryKey);
       setBillerId("");
-      setConsumerNumber("");
+      setInputValues({});
     }
   }, [allowedCategories, categoryKey, selectedCategory?.categoryKey]);
 
   const { data: billerData } = useQuery({
-    queryKey: ["bbps-billers", categoryKey],
+    queryKey: ["bbps-operators", categoryKey],
     queryFn: async () =>
-      (await api.get("/bbps/billers", { params: { categoryKey } })).data,
+      (await api.get("/bbps/operators", { params: { categoryKey } })).data,
     enabled: Boolean(categoryKey),
   });
   const billers = billerData?.billers ?? [];
   const selectedBiller =
     billers.find((biller: any) => biller.billerId === billerId) ?? billers[0];
+
+  const { data: detailData, isFetching: loadingDetails } = useQuery({
+    queryKey: ["bbps-biller-details", billerId],
+    queryFn: async () =>
+      (await api.get("/bbps/biller-details", { params: { billerId } })).data,
+    enabled: Boolean(billerId),
+  });
+  const inputFields = normalizeParameters(
+    detailData?.details?.parameters ?? [],
+    serviceKey || selectedCategory?.serviceKey || "",
+  );
 
   useEffect(() => {
     if (billers[0]?.billerId && billers[0].billerId !== billerId)
@@ -98,7 +178,7 @@ export function DynamicBbpsPage({
   }, [billers, billerId]);
 
   useEffect(() => {
-    setConsumerNumber("");
+    setInputValues({});
     setBill(null);
     setReceipt(null);
   }, [billerId, categoryKey]);
@@ -107,7 +187,18 @@ export function DynamicBbpsPage({
     if (!selectedCategory?.categoryKey)
       return "Service category not available.";
     if (!billerId) return "Operator is required";
-    if (!consumerNumber.trim()) return "Consumer Number is required";
+    for (const field of inputFields) {
+      const value = inputValues[field.name]?.trim() ?? "";
+      if (field.mandatory && !value) return `${field.desc} is required`;
+      if (value && field.regex) {
+        try {
+          if (!new RegExp(String(field.regex)).test(value))
+            return `${field.desc} is invalid`;
+        } catch {
+          return "";
+        }
+      }
+    }
     return "";
   }
 
@@ -119,13 +210,18 @@ export function DynamicBbpsPage({
     setStatus("Fetching bill from DigiSeva...");
     setReceipt(null);
     try {
-      await api.get("/bbps/biller-details", { params: { billerId } });
+      const inputParameters = Object.fromEntries(
+        inputFields.map((field) => [
+          field.name,
+          inputValues[field.name]?.trim() ?? "",
+        ]),
+      );
       const { data } = await api.post("/bbps/fetch-bill", {
         billerId,
         categoryKey,
         categoryName: selectedCategory?.categoryName ?? categoryKey,
         billerName: selectedBiller?.billerName ?? billerId,
-        inputParameters: { consumerNumber: consumerNumber.trim() },
+        inputParameters,
       });
       setBill(data);
       setStatus("Bill fetched. Verify details before wallet payment.");
@@ -161,7 +257,7 @@ export function DynamicBbpsPage({
         idempotencyKey: crypto.randomUUID(),
       });
       setReceipt(data);
-      setStatus("SUCCESS - Processing by BharatPayU");
+      setStatus("Payment successful. Awaiting admin settlement approval.");
     } catch (requestError: any) {
       setStatus(
         requestError?.response?.data?.error?.message ??
@@ -201,6 +297,11 @@ export function DynamicBbpsPage({
                   value={billerId}
                   onChange={(event) => setBillerId(event.target.value)}
                 >
+                  {billers.length === 0 && (
+                    <option className="bg-slate-950" value="">
+                      No live operators found
+                    </option>
+                  )}
                   {billers.map((biller: any) => (
                     <option
                       className="bg-slate-950"
@@ -218,17 +319,38 @@ export function DynamicBbpsPage({
                 )}
               </label>
               <label className="grid gap-2 text-sm text-slate-300">
-                Consumer Number
-                <Input
-                  value={consumerNumber}
-                  onChange={(event) => setConsumerNumber(event.target.value)}
-                  placeholder="Enter consumer number"
-                  required
-                />
+                Service Details
+                <div className="grid gap-3">
+                  {inputFields.map((field) => (
+                    <Input
+                      key={field.name}
+                      value={inputValues[field.name] ?? ""}
+                      onChange={(event) =>
+                        setInputValues((current) => ({
+                          ...current,
+                          [field.name]: event.target.value,
+                        }))
+                      }
+                      placeholder={`Enter ${field.desc}`}
+                      required={field.mandatory}
+                    />
+                  ))}
+                </div>
+                {loadingDetails && (
+                  <span className="text-xs text-slate-400">
+                    Loading operator fields...
+                  </span>
+                )}
               </label>
               <Button
                 disabled={
-                  busy || !billerId || !categoryKey || !consumerNumber.trim()
+                  busy ||
+                  !billerId ||
+                  !categoryKey ||
+                  inputFields.some(
+                    (field) =>
+                      field.mandatory && !inputValues[field.name]?.trim(),
+                  )
                 }
                 type="submit"
               >
@@ -290,25 +412,133 @@ export function DynamicBbpsPage({
               </div>
             )}
             {receipt && (
-              <div className="mt-5 rounded-md border border-green-400/20 bg-green-500/10 p-5">
-                <CheckCircle2 className="mb-3 text-green-300" />
-                <h3 className="text-xl font-bold">SUCCESS</h3>
-                <p className="mt-2 text-sm text-green-50">
-                  Processing by BharatPayU
-                </p>
-                <p className="text-sm text-green-50">
-                  Internal Transaction ID: {receipt.transactionId}
-                </p>
-                <p className="text-sm text-green-50">
-                  Amount: {formatCurrency(Number(receipt.amount))}
-                </p>
-                <p className="text-sm text-green-50">
-                  Service: {receipt.service}
-                </p>
-                <p className="text-sm text-green-50">
-                  Operator: {receipt.operator}
-                </p>
-              </div>
+              <>
+                <div
+                  id="bbps-print-receipt"
+                  className="mt-5 overflow-hidden rounded-md border border-white/10 bg-white text-slate-950 shadow-2xl shadow-blue-950/30"
+                >
+                  <div className="border-b border-slate-200 bg-slate-950 p-5 text-white">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src="/brand/bharatpayu-logo.png"
+                          alt="BharatPayU"
+                          className="h-14 w-14 rounded-md bg-white object-contain p-1"
+                        />
+                        <div>
+                          <p className="text-xl font-black">BHARATPAYU</p>
+                          <p className="text-xs text-slate-300">
+                            Trusted Digital Payments Since 2021
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-left md:text-right">
+                        <p className="text-xs uppercase tracking-[0.18em] text-green-200">
+                          Payment receipt
+                        </p>
+                        <p className="mt-1 text-lg font-black text-green-300">
+                          SUCCESS
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid gap-5 p-5">
+                    <div className="rounded-md border border-green-200 bg-green-50 p-4">
+                      <div className="flex items-center gap-2 text-green-700">
+                        <CheckCircle2 size={20} />
+                        <b>Retailer payment successful</b>
+                      </div>
+                      <p className="mt-1 text-sm text-slate-600">
+                        {receipt.message ??
+                          "Pending admin settlement approval."}
+                      </p>
+                    </div>
+                    <div className="grid gap-3 text-sm md:grid-cols-2">
+                      {[
+                        ["Internal Transaction ID", receipt.transactionId],
+                        [
+                          "Provider Transaction ID",
+                          receipt.bbpsReferenceId ??
+                            "Pending admin approval",
+                        ],
+                        [
+                          "Settlement Status",
+                          settlementLabel(receipt.settlementStatus),
+                        ],
+                        ["Paid Amount", formatCurrency(Number(receipt.amount))],
+                        ["Service", receipt.service],
+                        ["Operator", receipt.operator],
+                        ["Customer", receipt.customerName],
+                        ["Consumer Number", receipt.consumerNumber],
+                        ["Bill Number", receipt.billNumber],
+                        [
+                          "Due Date",
+                          receipt.dueDate
+                            ? new Date(receipt.dueDate).toLocaleDateString(
+                                "en-IN",
+                              )
+                            : "-",
+                        ],
+                        [
+                          "Receipt Time",
+                          receipt.time
+                            ? new Date(receipt.time).toLocaleString("en-IN")
+                            : new Date().toLocaleString("en-IN"),
+                        ],
+                      ].map(([label, value]) => (
+                        <p
+                          key={label}
+                          className="rounded-md border border-slate-200 bg-slate-50 p-3"
+                        >
+                          <span className="block text-xs font-semibold uppercase text-slate-500">
+                            {label}
+                          </span>
+                          <b className="mt-1 block break-words text-slate-950">
+                            {String(value ?? "-")}
+                          </b>
+                        </p>
+                      ))}
+                    </div>
+                    <div className="border-t border-dashed border-slate-300 pt-4 text-xs leading-5 text-slate-500">
+                      This receipt confirms wallet debit and bill payment request
+                      submission through BharatPayU. The provider transaction ID
+                      appears after admin approval.
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  className="no-print mt-4 w-full"
+                  variant="secondary"
+                  onClick={() => window.print()}
+                >
+                  <Download size={16} /> Print Receipt Only
+                </Button>
+                <style jsx global>{`
+                  @media print {
+                    body * {
+                      visibility: hidden !important;
+                    }
+
+                    #bbps-print-receipt,
+                    #bbps-print-receipt * {
+                      visibility: visible !important;
+                    }
+
+                    #bbps-print-receipt {
+                      position: absolute !important;
+                      inset: 0 auto auto 0 !important;
+                      width: 100% !important;
+                      border: 0 !important;
+                      border-radius: 0 !important;
+                      box-shadow: none !important;
+                    }
+
+                    .no-print {
+                      display: none !important;
+                    }
+                  }
+                `}</style>
+              </>
             )}
           </Card>
         </div>

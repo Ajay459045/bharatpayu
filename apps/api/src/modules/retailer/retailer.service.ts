@@ -7,6 +7,8 @@ import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
 import { Device } from "../auth/schemas/device.schema";
 import { Session } from "../auth/schemas/session.schema";
+import { BbpsBiller } from "../bbps/schemas/bbps-biller.schema";
+import { BbpsCategory } from "../bbps/schemas/bbps-category.schema";
 import { BbpsTransaction } from "../bbps/schemas/bbps-transaction.schema";
 import { Ledger } from "../ledger/schemas/ledger.schema";
 import { Notification } from "../notification/schemas/notification.schema";
@@ -24,31 +26,26 @@ const services = [
     key: "electricity",
     label: "Electricity Bill Payment",
     categoryAliases: ["electricity"],
-    operators: ["Fetched from DigiSeva"],
   },
   {
     key: "water",
     label: "Water Bill Payment",
     categoryAliases: ["water"],
-    operators: ["Fetched from DigiSeva"],
   },
   {
     key: "insurance",
     label: "Insurance Premium Payment",
     categoryAliases: ["insurance", "life insurance", "health insurance"],
-    operators: ["Fetched from DigiSeva"],
   },
   {
     key: "gas",
     label: "Piped Gas Bill Payment",
     categoryAliases: ["piped gas", "png"],
-    operators: ["Fetched from DigiSeva"],
   },
   {
     key: "lpg",
     label: "LPG Gas Payment",
     categoryAliases: ["lpg gas", "lpg"],
-    operators: ["Fetched from DigiSeva"],
   },
 ];
 
@@ -68,6 +65,10 @@ export class RetailerService {
     private readonly walletTxnModel: Model<WalletTransaction>,
     @InjectModel(BbpsTransaction.name)
     private readonly txnModel: Model<BbpsTransaction>,
+    @InjectModel(BbpsCategory.name)
+    private readonly categoryModel: Model<BbpsCategory>,
+    @InjectModel(BbpsBiller.name)
+    private readonly billerModel: Model<BbpsBiller>,
     @InjectModel(Ledger.name) private readonly ledgerModel: Model<Ledger>,
     @InjectModel(TdsReport.name) private readonly tdsModel: Model<TdsReport>,
     @InjectModel(Notification.name)
@@ -140,6 +141,7 @@ export class RetailerService {
       (sum, txn) => sum + Number(txn.amount ?? 0),
       0,
     );
+    const liveServices = await this.liveServices();
 
     return {
       profile: this.safeUser(user),
@@ -216,7 +218,7 @@ export class RetailerService {
       ],
       charts: {
         daily: this.dailyChart(txns),
-        serviceWise: services.map((service) => ({
+        serviceWise: liveServices.map((service) => ({
           name: service.label
             .replace(" Bill Payment", "")
             .replace(" Premium Payment", "")
@@ -235,7 +237,7 @@ export class RetailerService {
       walletHistory,
       ledgers,
       notifications,
-      services,
+      services: liveServices,
     };
   }
 
@@ -402,8 +404,39 @@ export class RetailerService {
     return { devices, sessions };
   }
 
-  services() {
-    return { services };
+  async services() {
+    return { services: await this.liveServices() };
+  }
+
+  private async liveServices() {
+    const categories = await this.categoryModel
+      .find({ serviceKey: { $in: services.map((service) => service.key) } })
+      .lean();
+    const categoryByService = new Map(
+      categories.map((category) => [category.serviceKey, category]),
+    );
+
+    return Promise.all(
+      services.map(async (service) => {
+        const category = categoryByService.get(service.key);
+        const billers = category
+          ? await this.billerModel
+              .find({
+                categoryKey: category.categoryKey,
+                billerStatus: "ACTIVE",
+                isAvailable: { $ne: false },
+                billerName: { $not: /demo operator/i },
+              })
+              .sort({ billerName: 1 })
+              .lean()
+          : [];
+
+        return {
+          ...service,
+          operators: billers.map((biller) => biller.billerName),
+        };
+      }),
+    );
   }
 
   private safeUser(user: any) {

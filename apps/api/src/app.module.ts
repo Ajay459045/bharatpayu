@@ -20,6 +20,21 @@ import { RetailerModule } from "./modules/retailer/retailer.module";
 import { TdsModule } from "./modules/tds/tds.module";
 import { UsersModule } from "./modules/users/users.module";
 import { WalletModule } from "./modules/wallet/wallet.module";
+import { isBullMqDisabled } from "./shared/bullmq-toggle";
+
+const bullImports =
+  isBullMqDisabled()
+    ? []
+    : [
+        BullModule.forRootAsync({
+          inject: [ConfigService],
+          useFactory: (config: ConfigService) => ({
+            connection: {
+              url: config.get<string>("REDIS_URL", "redis://localhost:6379")
+            }
+          })
+        })
+      ];
 
 @Module({
   imports: [
@@ -30,10 +45,7 @@ import { WalletModule } from "./modules/wallet/wallet.module";
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({ uri: config.getOrThrow<string>("MONGODB_URI") })
     }),
-    BullModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({ connection: { url: config.get<string>("REDIS_URL", "redis://localhost:6379") } })
-    }),
+    ...bullImports,
     HealthModule,
     AuthModule,
     UsersModule,

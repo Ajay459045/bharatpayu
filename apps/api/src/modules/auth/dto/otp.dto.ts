@@ -83,6 +83,45 @@ export class ChangePasswordDto {
   confirmPassword!: string;
 }
 
+export class TwoFactorSetupDto {
+  @IsOptional()
+  @IsString()
+  setupToken?: string;
+}
+
+export class TwoFactorEnableDto {
+  @IsString()
+  setupChallengeId!: string;
+
+  @Matches(/^\d{6}$/)
+  code!: string;
+
+  @IsOptional()
+  @IsString()
+  setupToken?: string;
+
+  @IsOptional()
+  @IsObject()
+  device?: Record<string, unknown>;
+}
+
+export class TwoFactorCodeDto {
+  @IsString()
+  code!: string;
+}
+
+export class TwoFactorLoginDto {
+  @IsString()
+  challengeToken!: string;
+
+  @IsString()
+  code!: string;
+
+  @IsOptional()
+  @IsObject()
+  device?: Record<string, unknown>;
+}
+
 export class RegisterDto {
   @IsIn(["retailer", "distributor"])
   role!: "retailer" | "distributor";

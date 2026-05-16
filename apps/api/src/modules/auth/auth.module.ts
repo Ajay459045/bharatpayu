@@ -3,6 +3,10 @@ import { JwtModule } from "@nestjs/jwt";
 import { MongooseModule } from "@nestjs/mongoose";
 import { PassportModule } from "@nestjs/passport";
 import {
+  ActivityLog,
+  ActivityLogSchema,
+} from "../admin/schemas/activity-log.schema";
+import {
   SecuritySetting,
   SecuritySettingSchema,
 } from "../admin/schemas/security-setting.schema";
@@ -24,6 +28,7 @@ import { JwtStrategy } from "./strategies/jwt.strategy";
     PassportModule,
     JwtModule.register({}),
     MongooseModule.forFeature([
+      { name: ActivityLog.name, schema: ActivityLogSchema },
       { name: Device.name, schema: DeviceSchema },
       { name: OtpLog.name, schema: OtpLogSchema },
       { name: SecuritySetting.name, schema: SecuritySettingSchema },

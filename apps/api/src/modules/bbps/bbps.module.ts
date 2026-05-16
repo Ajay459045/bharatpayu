@@ -5,6 +5,7 @@ import { MongooseModule } from "@nestjs/mongoose";
 import { CommissionModule } from "../commission/commission.module";
 import { LedgerModule } from "../ledger/ledger.module";
 import { NotificationModule } from "../notification/notification.module";
+import { isBullMqDisabled } from "../../shared/bullmq-toggle";
 import { TdsModule } from "../tds/tds.module";
 import { UsersModule } from "../users/users.module";
 import { WalletModule } from "../wallet/wallet.module";
@@ -47,7 +48,7 @@ import {
     TdsModule,
     UsersModule,
     NotificationModule,
-    BullModule.registerQueue({ name: "reconciliation" }),
+    ...(isBullMqDisabled() ? [] : [BullModule.registerQueue({ name: "reconciliation" })]),
     MongooseModule.forFeature([
       { name: BbpsTransaction.name, schema: BbpsTransactionSchema },
       {

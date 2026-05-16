@@ -1,19 +1,19 @@
 import axios from "axios";
 
-const fallbackApiUrl = "http://localhost:4000/api/v1";
-
-function normalizeApiUrl(url: string) {
-  const absoluteUrl = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-  return absoluteUrl.replace(/\/+$|\s+$/g, "");
-}
+// Production builds must never fall back to localhost: browsers will either
+// refuse the connection or block HTTP requests from the HTTPS site.
+const fallbackApiUrl = "https://bharatpayu.com/api/v1";
 
 export function getApiBaseUrl() {
-  const configuredUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
-  if (configuredUrl) {
-    return normalizeApiUrl(configuredUrl);
-  }
+  const configuredUrl =
+    process.env.NEXT_PUBLIC_API_URL?.trim() ||
+    fallbackApiUrl;
 
-  return normalizeApiUrl(fallbackApiUrl);
+  const absoluteUrl = /^https?:\/\//i.test(configuredUrl)
+    ? configuredUrl
+    : `https://${configuredUrl}`;
+
+  return absoluteUrl.replace(/\/$/, "");
 }
 
 export function getApiOrigin() {
@@ -21,20 +21,38 @@ export function getApiOrigin() {
 }
 
 export const api = axios.create({
+  baseURL: getApiBaseUrl(),
   timeout: 20000,
   headers: {
-    "Content-Type": "application/json"
-  }
+    "Content-Type": "application/json",
+  },
 });
 
 api.interceptors.request.use((config) => {
-  if (!config.baseURL && config.url && !/^https?:\/\//i.test(config.url)) {
-    config.baseURL = getApiBaseUrl();
-  }
-
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("bharatpayu.accessToken");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
   }
+
   return config;
+});
+
+api.interceptors.response.use((response) => {
+  if (typeof window !== "undefined") {
+    const accessToken = response.data?.accessToken;
+    const approvalStatus = response.data?.user?.approvalStatus;
+
+    if (accessToken) {
+      localStorage.setItem("bharatpayu.accessToken", accessToken);
+    }
+
+    if (approvalStatus) {
+      localStorage.setItem("bharatpayu.approvalStatus", approvalStatus);
+    }
+  }
+
+  return response;
 });

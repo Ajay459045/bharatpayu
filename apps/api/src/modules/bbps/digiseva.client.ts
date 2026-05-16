@@ -15,18 +15,6 @@ export class DigiSevaClient {
   ) {}
 
   async categories() {
-    if (this.shouldUseMock()) {
-      return {
-        status: true,
-        data: [
-          { categoryKey: "C01", categoryName: "Electricity", billerList: 2 },
-          { categoryKey: "C02", categoryName: "Water", billerList: 1 },
-          { categoryKey: "C03", categoryName: "Insurance", billerList: 1 },
-          { categoryKey: "C04", categoryName: "Piped Gas", billerList: 1 },
-          { categoryKey: "C05", categoryName: "LPG Gas", billerList: 1 },
-        ],
-      };
-    }
     const response = await this.providerRequest(
       this.http.get(`${this.baseUrl()}/InstantPay/BillerCategory`, {
         headers: this.getHeaders(),
@@ -36,22 +24,13 @@ export class DigiSevaClient {
   }
 
   async billers(categoryKey: string) {
-    if (this.shouldUseMock()) {
-      return {
-        data: [
-          {
-            billerId: `${categoryKey}BILLER1`,
-            billerName: `${categoryKey} Demo Operator`,
-            categoryKey,
-            type: "ONUS",
-            billerStatus: "ACTIVE",
-          },
-        ],
-      };
-    }
+    const categoryParam = this.config.get<string>(
+      "DIGISEVA_BILLER_LIST_CATEGORY_PARAM",
+      "categoryKey",
+    );
     const response = await this.providerRequest(
       this.http.get(`${this.baseUrl()}/InstantPay/BillerList`, {
-        params: { categoryKey },
+        params: { [categoryParam]: categoryKey },
         headers: this.getHeaders(),
       }),
     );
@@ -59,18 +38,6 @@ export class DigiSevaClient {
   }
 
   async billerDetails(billerId: string) {
-    if (this.shouldUseMock()) {
-      return {
-        parameters: [
-          {
-            name: "param1",
-            desc: "Consumer Number",
-            mandatory: 1,
-            regex: "^[0-9]{4,20}$",
-          },
-        ],
-      };
-    }
     const response = await this.providerRequest(
       this.http.get(`${this.baseUrl()}/InstantPay/BillerDetails`, {
         params: { billerId },
@@ -81,19 +48,6 @@ export class DigiSevaClient {
   }
 
   async fetchBill(payload: Record<string, unknown>) {
-    if (this.shouldUseMock()) {
-      return {
-        customerName: "Utility Customer",
-        billAmount: 1240,
-        dueDate: new Date(Date.now() + 86400000 * 7).toISOString(),
-        billNumber: `BPUBILL${Date.now()}`,
-        operator: payload.billerName,
-        consumerNumber:
-          Object.values(
-            (payload.inputParameters as Record<string, unknown>) ?? {},
-          )[0] ?? "",
-      };
-    }
     const response = await this.providerRequest(
       this.http.post(`${this.baseUrl()}/InstantPay/FetchBillDetails`, payload, {
         headers: this.postHeaders(),
@@ -103,7 +57,7 @@ export class DigiSevaClient {
   }
 
   isMockMode() {
-    return this.shouldUseMock();
+    return false;
   }
 
   private baseUrl() {
@@ -163,20 +117,6 @@ export class DigiSevaClient {
       usercode,
       "access-mode": this.config.get<string>("DIGISEVA_ACCESS_MODE", "web"),
     };
-  }
-
-  private shouldUseMock() {
-    const mode = this.config.get<string>("DIGISEVA_MOCK", "").toLowerCase();
-    if (["1", "true", "yes"].includes(mode)) return true;
-    if (["0", "false", "no"].includes(mode)) return false;
-    return (
-      !this.configValue("DIGISEVA_API_KEY", "DIGISEVA_CLIENT_ID") ||
-      !this.configValue(
-        "DIGISEVA_USERCODE",
-        "DIGISEVA_POS_ID",
-        "DIGISEVA_CLIENT_SECRET",
-      )
-    );
   }
 
   private configValue(...keys: string[]) {

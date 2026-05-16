@@ -3,6 +3,11 @@ import { MongooseModule } from "@nestjs/mongoose";
 import { Device, DeviceSchema } from "../auth/schemas/device.schema";
 import { Session, SessionSchema } from "../auth/schemas/session.schema";
 import { BbpsModule } from "../bbps/bbps.module";
+import { BbpsBiller, BbpsBillerSchema } from "../bbps/schemas/bbps-biller.schema";
+import {
+  BbpsCategory,
+  BbpsCategorySchema,
+} from "../bbps/schemas/bbps-category.schema";
 import {
   BbpsTransaction,
   BbpsTransactionSchema,
@@ -55,6 +60,8 @@ import { RetailerService } from "./retailer.service";
       { name: WalletLoadRequest.name, schema: WalletLoadRequestSchema },
       { name: WalletTransaction.name, schema: WalletTransactionSchema },
       { name: BbpsTransaction.name, schema: BbpsTransactionSchema },
+      { name: BbpsCategory.name, schema: BbpsCategorySchema },
+      { name: BbpsBiller.name, schema: BbpsBillerSchema },
       { name: Ledger.name, schema: LedgerSchema },
       { name: TdsReport.name, schema: TdsReportSchema },
       { name: Notification.name, schema: NotificationSchema },

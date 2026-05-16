@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
+import { TwoFactorSecurityPanel } from "@/components/two-factor-security-panel";
 
 export function ChangePasswordPanel({
   backHref,
@@ -111,6 +112,9 @@ export function ChangePasswordPanel({
             </p>
           )}
         </Card>
+        <div className="mt-5">
+          <TwoFactorSecurityPanel />
+        </div>
       </div>
     </main>
   );

@@ -16,8 +16,8 @@ npm install
 npm run dev
 ```
 
-Frontend: http://localhost:3000  
-API: http://localhost:4000/api/v1/health
+Frontend dev server: port `3000`  
+API dev server: port `4000`, health path `/api/v1/health`
 
 ## Production
 

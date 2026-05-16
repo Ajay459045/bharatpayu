@@ -4,14 +4,25 @@ export class FetchBillDto {
   @IsString()
   billerId!: string;
 
+  @IsOptional()
   @IsString()
-  categoryKey!: string;
+  categoryKey?: string;
 
+  @IsOptional()
   @IsString()
-  categoryName!: string;
+  categoryName?: string;
 
+  @IsOptional()
   @IsString()
-  billerName!: string;
+  billerName?: string;
+
+  @IsOptional()
+  @IsString()
+  initChannel?: string;
+
+  @IsOptional()
+  @IsString()
+  externalRef?: string;
 
   @IsObject()
   inputParameters!: Record<string, string>;
@@ -19,4 +30,11 @@ export class FetchBillDto {
   @IsOptional()
   @IsObject()
   deviceInfo?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  remarks?: Record<string, unknown>;
+
+  @IsOptional()
+  transactionAmount?: number;
 }

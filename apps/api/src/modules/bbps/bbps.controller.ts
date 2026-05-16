@@ -35,14 +35,6 @@ export class BbpsController {
     return this.bbps.billers(categoryKey, sync === "true" || sync === "1");
   }
 
-  @Get("operators")
-  operators(
-    @Query("categoryKey") categoryKey: string,
-    @Query("sync") sync?: string,
-  ) {
-    return this.bbps.billers(categoryKey, sync === "true" || sync === "1");
-  }
-
   @Get("biller-details")
   billerDetails(@Query("billerId") billerId: string) {
     return this.bbps.billerDetails(billerId);

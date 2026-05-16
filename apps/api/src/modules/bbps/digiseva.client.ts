@@ -24,13 +24,9 @@ export class DigiSevaClient {
   }
 
   async billers(categoryKey: string) {
-    const categoryParam = this.config.get<string>(
-      "DIGISEVA_BILLER_LIST_CATEGORY_PARAM",
-      "categoryKey",
-    );
     const response = await this.providerRequest(
       this.http.get(`${this.baseUrl()}/InstantPay/BillerList`, {
-        params: { [categoryParam]: categoryKey },
+        params: { categoryKey },
         headers: this.getHeaders(),
       }),
     );
@@ -51,6 +47,7 @@ export class DigiSevaClient {
     const response = await this.providerRequest(
       this.http.post(`${this.baseUrl()}/InstantPay/FetchBillDetails`, payload, {
         headers: this.postHeaders(),
+        timeout: this.timeoutMs(),
       }),
     );
     return response.data;
@@ -67,16 +64,22 @@ export class DigiSevaClient {
     );
   }
 
+  private timeoutMs() {
+    return Number(this.config.get<string>("DIGISEVA_TIMEOUT_MS", "30000"));
+  }
+
   private async providerRequest(request: ReturnType<HttpService["get"]>) {
     try {
       return await firstValueFrom(request);
     } catch (error: any) {
       const statusCode = error?.response?.status;
       const providerMessage =
-        error?.response?.data?.message ??
-        error?.response?.data?.error ??
-        error?.message ??
-        "Provider request failed";
+        error?.code === "ECONNABORTED"
+          ? "DigiSeva request timed out"
+          : error?.response?.data?.message ??
+            error?.response?.data?.error ??
+            error?.message ??
+            "Provider request failed";
       throw new BadGatewayException({
         provider: "digiseva",
         statusCode,

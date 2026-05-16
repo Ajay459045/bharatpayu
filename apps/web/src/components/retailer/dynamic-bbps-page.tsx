@@ -45,6 +45,8 @@ type BbpsInputField = {
   name: string;
   desc: string;
   regex?: string;
+  minLength?: number;
+  maxLength?: number;
   mandatory: boolean;
 };
 
@@ -83,6 +85,20 @@ function normalizeParameters(parameters: any[], key: string): BbpsInputField[] {
             `Field ${index + 1}`,
         ).trim() || `Field ${index + 1}`,
       regex: parameter?.regex ?? parameter?.pattern ?? parameter?.regEx,
+      minLength: Number(
+        parameter?.minLength ??
+          parameter?.min ??
+          parameter?.minimumLength ??
+          parameter?.minlength ??
+          0,
+      ) || undefined,
+      maxLength: Number(
+        parameter?.maxLength ??
+          parameter?.max ??
+          parameter?.maximumLength ??
+          parameter?.maxlength ??
+          0,
+      ) || undefined,
       mandatory: isMandatory(parameter),
     }))
     .filter((parameter) => parameter.name);
@@ -152,12 +168,12 @@ export function DynamicBbpsPage({
   }, [allowedCategories, categoryKey, selectedCategory?.categoryKey]);
 
   const { data: billerData } = useQuery({
-    queryKey: ["bbps-operators", categoryKey],
+    queryKey: ["bbps-billers", categoryKey],
     queryFn: async () =>
-      (await api.get("/bbps/operators", { params: { categoryKey } })).data,
+      (await api.get("/bbps/billers", { params: { categoryKey } })).data,
     enabled: Boolean(categoryKey),
   });
-  const billers = billerData?.billers ?? [];
+  const billers = billerData?.data ?? [];
   const selectedBiller =
     billers.find((biller: any) => biller.billerId === billerId) ?? billers[0];
 
@@ -168,7 +184,7 @@ export function DynamicBbpsPage({
     enabled: Boolean(billerId),
   });
   const inputFields = normalizeParameters(
-    detailData?.details?.parameters ?? [],
+    detailData?.data?.parameters ?? detailData?.details?.parameters ?? [],
     serviceKey || selectedCategory?.serviceKey || "",
   );
 
@@ -186,10 +202,14 @@ export function DynamicBbpsPage({
   function validate() {
     if (!selectedCategory?.categoryKey)
       return "Service category not available.";
-    if (!billerId) return "Operator is required";
+    if (!billerId) return "Biller is required";
     for (const field of inputFields) {
       const value = inputValues[field.name]?.trim() ?? "";
       if (field.mandatory && !value) return `${field.desc} is required`;
+      if (value && field.minLength && value.length < field.minLength)
+        return `${field.desc} must be at least ${field.minLength} characters`;
+      if (value && field.maxLength && value.length > field.maxLength)
+        return `${field.desc} must be at most ${field.maxLength} characters`;
       if (value && field.regex) {
         try {
           if (!new RegExp(String(field.regex)).test(value))
@@ -218,12 +238,13 @@ export function DynamicBbpsPage({
       );
       const { data } = await api.post("/bbps/fetch-bill", {
         billerId,
+        initChannel: "AGT",
         categoryKey,
         categoryName: selectedCategory?.categoryName ?? categoryKey,
         billerName: selectedBiller?.billerName ?? billerId,
         inputParameters,
       });
-      setBill(data);
+      setBill(data.data ?? data);
       setStatus("Bill fetched. Verify details before wallet payment.");
     } catch (requestError: any) {
       setBill(null);
@@ -291,7 +312,7 @@ export function DynamicBbpsPage({
             <Zap className="mb-4 text-blue-300" />
             <form className="grid gap-4" onSubmit={fetchBill}>
               <label className="grid gap-2 text-sm text-slate-300">
-                Biller / Operator
+                Biller
                 <select
                   className="h-11 rounded-md border border-white/10 bg-white/8 px-3 text-sm"
                   value={billerId}
@@ -299,7 +320,7 @@ export function DynamicBbpsPage({
                 >
                   {billers.length === 0 && (
                     <option className="bg-slate-950" value="">
-                      No live operators found
+                      No live billers found
                     </option>
                   )}
                   {billers.map((biller: any) => (
@@ -333,12 +354,15 @@ export function DynamicBbpsPage({
                       }
                       placeholder={`Enter ${field.desc}`}
                       required={field.mandatory}
+                      minLength={field.minLength}
+                      maxLength={field.maxLength}
+                      pattern={field.regex}
                     />
                   ))}
                 </div>
                 {loadingDetails && (
                   <span className="text-xs text-slate-400">
-                    Loading operator fields...
+                    Loading biller fields...
                   </span>
                 )}
               </label>

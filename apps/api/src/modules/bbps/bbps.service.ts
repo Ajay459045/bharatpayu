@@ -1,4 +1,5 @@
 import {
+  BadGatewayException,
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -126,13 +127,14 @@ export class BbpsService {
   }
 
   async billers(categoryKey: string, forceSync = false) {
-    if (!categoryKey?.trim()) {
+    const normalizedCategoryKey = categoryKey?.trim();
+    if (!normalizedCategoryKey) {
       throw new BadRequestException("categoryKey is required");
     }
-    await this.removeDemoBillers(categoryKey);
+    await this.removeDemoBillers(normalizedCategoryKey);
     const cached = await this.billerModel
       .find({
-        categoryKey,
+        categoryKey: normalizedCategoryKey,
         billerStatus: "ACTIVE",
         isAvailable: { $ne: false },
       })
@@ -143,9 +145,15 @@ export class BbpsService {
         row.syncedAt &&
         Date.now() - new Date(row.syncedAt).getTime() < 6 * 60 * 60 * 1000,
     );
-    if (cached.length && freshEnough && !forceSync) return { billers: cached };
+    if (cached.length && freshEnough && !forceSync) {
+      return {
+        success: true,
+        count: cached.length,
+        data: cached,
+      };
+    }
 
-    const response = await this.digiseva.billers(categoryKey);
+    const response = await this.digiseva.billers(normalizedCategoryKey);
     await this.apiLogModel.create({
       provider: "digiseva",
       endpoint: "BillerList",
@@ -159,62 +167,34 @@ export class BbpsService {
       "biller",
       "result",
     ]);
+    const billers = this.normalizeBillerRows(rows, normalizedCategoryKey);
     await Promise.all(
-      rows
-        .filter(
-          (row: any) =>
-            this.pickString(row, ["billerId", "id"]) &&
-            this.pickString(row, ["billerName", "name"]) &&
-            row.isAvailable !== false,
-        )
-        .map((row: any) =>
+      billers.map((biller) =>
           this.billerModel.findOneAndUpdate(
-            { billerId: this.pickString(row, ["billerId", "id"]) },
-            {
-              billerId: this.pickString(row, ["billerId", "id"]),
-              billerName: this.pickString(row, ["billerName", "name"]),
-              categoryKey: row.categoryKey ?? categoryKey,
-              categoryName: row.categoryName,
-              type: row.type,
-              coverageCity: String(row.coverageCity ?? ""),
-              coverageState: String(row.coverageState ?? ""),
-              coveragePincode:
-                row.coveragePincode === undefined ||
-                row.coveragePincode === null
-                  ? undefined
-                  : String(row.coveragePincode),
-              updatedDate: row.updatedDate,
-              billerStatus: row.billerStatus ?? "ACTIVE",
-              isAvailable: row.isAvailable !== false,
-              iconUrl: row.iconUrl,
-              syncedAt: new Date(),
-            },
+            { billerId: biller.billerId },
+            { ...biller, syncedAt: new Date() },
             { upsert: true, new: true },
           ),
         ),
     );
-    return {
-      billers: await this.billerModel
-        .find({
-          categoryKey,
-          billerStatus: "ACTIVE",
-          isAvailable: { $ne: false },
-        })
-        .sort({ billerName: 1 })
-        .lean(),
-    };
+    return { success: true, count: billers.length, data: billers };
   }
 
   async billerDetails(billerId: string) {
-    const cached = await this.detailModel.findOne({ billerId }).lean();
+    const normalizedBillerId = billerId?.trim();
+    if (!normalizedBillerId) {
+      throw new BadRequestException("billerId is required");
+    }
+
+    const cached = await this.detailModel.findOne({ billerId: normalizedBillerId }).lean();
     if (
       cached &&
       cached.syncedAt &&
       Date.now() - new Date(cached.syncedAt).getTime() < 6 * 60 * 60 * 1000
     ) {
-      return { details: cached };
+      return { success: true, data: this.cleanBillerDetails(cached), details: cached };
     }
-    const response = await this.digiseva.billerDetails(billerId);
+    const response = await this.digiseva.billerDetails(normalizedBillerId);
     const billerDetail = this.extractBillerDetail(response);
     await this.apiLogModel.create({
       provider: "digiseva",
@@ -233,11 +213,11 @@ export class BbpsService {
       ]),
     );
     const details = await this.detailModel.findOneAndUpdate(
-      { billerId },
-      { billerId, parameters, raw: billerDetail, syncedAt: new Date() },
+      { billerId: normalizedBillerId },
+      { billerId: normalizedBillerId, parameters, raw: billerDetail, syncedAt: new Date() },
       { upsert: true, new: true },
     );
-    return { details };
+    return { success: true, data: this.cleanBillerDetails(details), details };
   }
 
   async fetchBill(
@@ -246,6 +226,7 @@ export class BbpsService {
     request?: { ip?: string },
   ) {
     const retailer = await this.assertRetailerCanTransact(retailerId);
+    this.validateFetchBillRequest(dto);
     this.assertRetailerServiceAccess(retailer, dto.categoryName);
     const details = await this.billerDetails(dto.billerId);
     const billerDetail = (details.details?.raw ?? {}) as Record<string, any>;
@@ -258,22 +239,31 @@ export class BbpsService {
       details.details?.parameters ?? [],
       inputParameters,
     );
-    const externalRef = `BPUFETCH${Date.now()}${nanoid(6).toUpperCase()}`;
-    const initChannel = this.resolveInitChannel(billerDetail);
+    const externalRef =
+      dto.externalRef?.trim() || `BPUFETCH${Date.now()}${nanoid(6).toUpperCase()}`;
+    const initChannel = this.resolveFetchInitChannel(dto.initChannel, billerDetail);
+    const deviceInfo = this.buildDeviceInfo(
+      retailer,
+      dto.deviceInfo,
+      billerDetail,
+      initChannel,
+      request,
+    );
+    this.validateFetchBillProviderPayload({
+      ...dto,
+      initChannel,
+      externalRef,
+      inputParameters,
+      deviceInfo,
+    });
     const payload = {
       billerId: dto.billerId,
       initChannel,
       externalRef,
       inputParameters: this.buildInputParametersPayload(inputParameters),
-      deviceInfo: this.buildDeviceInfo(
-        retailer,
-        dto.deviceInfo,
-        billerDetail,
-        initChannel,
-        request,
-      ),
-      remarks: this.buildRemarksPayload(),
-      transactionAmount: 0,
+      deviceInfo,
+      remarks: this.buildRemarksPayload(dto.remarks),
+      transactionAmount: Number(dto.transactionAmount ?? 0),
     };
     await this.apiLogModel.create({
       provider: "digiseva",
@@ -282,13 +272,25 @@ export class BbpsService {
       payload,
     });
     const bill = await this.digiseva.fetchBill(payload);
+    if (!bill || typeof bill !== "object") {
+      throw new BadGatewayException("DigiSeva returned an invalid fetch bill response");
+    }
     await this.apiLogModel.create({
       provider: "digiseva",
       endpoint: "FetchBillDetails",
       direction: "response",
       payload: bill,
     });
-    return this.normalizeBill({ ...dto, inputParameters }, bill, externalRef);
+    const normalizedBill = this.normalizeBill(
+      { ...dto, inputParameters, initChannel, externalRef },
+      bill,
+      externalRef,
+    );
+    return {
+      success: true,
+      data: normalizedBill,
+      enquiryReferenceId: normalizedBill.enquiryReferenceId,
+    };
   }
 
   async payBill(
@@ -651,6 +653,10 @@ export class BbpsService {
       const value = input[name];
       if (Number(parameter.mandatory ?? 0) === 1 && !value)
         throw new BadRequestException(`${parameter.desc ?? name} is required`);
+      if (value && parameter.minLength && value.length < Number(parameter.minLength))
+        throw new BadRequestException(`${parameter.desc ?? name} must be at least ${parameter.minLength} characters`);
+      if (value && parameter.maxLength && value.length > Number(parameter.maxLength))
+        throw new BadRequestException(`${parameter.desc ?? name} must be at most ${parameter.maxLength} characters`);
       if (value && parameter.regex) {
         const regex = new RegExp(String(parameter.regex));
         if (!regex.test(String(value)))
@@ -705,12 +711,54 @@ export class BbpsService {
     return payload;
   }
 
-  private buildRemarksPayload() {
-    const remarks: Record<string, number> = {};
+  private buildRemarksPayload(input?: Record<string, unknown>) {
+    const remarks: Record<string, unknown> = {};
     for (let index = 1; index <= 7; index += 1) {
-      remarks[`param${index}`] = 0;
+      const key = `param${index}`;
+      remarks[key] = input?.[key] ?? 0;
     }
     return remarks;
+  }
+
+  private validateFetchBillRequest(dto: FetchBillDto) {
+    if (!dto.billerId?.trim()) {
+      throw new BadRequestException("billerId is required");
+    }
+    if (!dto.inputParameters || typeof dto.inputParameters !== "object") {
+      throw new BadRequestException("inputParameters is required");
+    }
+  }
+
+  private validateFetchBillProviderPayload(input: {
+    billerId?: string;
+    initChannel?: string;
+    externalRef?: string;
+    inputParameters?: Record<string, unknown>;
+    deviceInfo?: Record<string, unknown>;
+  }) {
+    if (!input.billerId?.trim()) throw new BadRequestException("billerId is required");
+    if (!input.initChannel?.trim()) throw new BadRequestException("initChannel is required");
+    if (!input.externalRef?.trim()) throw new BadRequestException("externalRef is required");
+    if (!input.inputParameters || !Object.keys(input.inputParameters).length) {
+      throw new BadRequestException("inputParameters is required");
+    }
+    if (!input.deviceInfo || typeof input.deviceInfo !== "object") {
+      throw new BadRequestException("deviceInfo is required");
+    }
+    if (input.initChannel.toUpperCase() === "AGT") {
+      for (const key of ["terminalId", "mobile", "postalCode", "geoCode"]) {
+        if (!String(input.deviceInfo[key] ?? "").trim()) {
+          throw new BadRequestException(`deviceInfo.${key} is required for AGT channel`);
+        }
+      }
+    }
+  }
+
+  private resolveFetchInitChannel(input: string | undefined, billerDetail: Record<string, any>) {
+    if (input?.trim()) return input.trim().toUpperCase();
+    const configured = this.config.get<string>("DIGISEVA_INIT_CHANNEL", "AGT");
+    if (configured?.trim()) return configured.trim().toUpperCase();
+    return this.resolveInitChannel(billerDetail);
   }
 
   private resolveInitChannel(billerDetail: Record<string, any>) {
@@ -821,6 +869,45 @@ export class BbpsService {
     });
   }
 
+  private normalizeBillerRows(rows: any[], categoryKey: string) {
+    return rows
+      .map((row) => {
+        const billerId = this.pickString(row, [
+          "billerId",
+          "billerID",
+          "id",
+        ]);
+        const billerName = this.pickString(row, [
+          "billerName",
+          "biller",
+          "name",
+        ]);
+        if (!billerId || !billerName || row.isAvailable === false) {
+          return undefined;
+        }
+        return {
+          billerId,
+          billerName,
+          categoryKey: this.pickString(row, ["categoryKey"]) || categoryKey,
+          categoryName: this.pickString(row, ["categoryName", "category"]),
+          type: this.pickString(row, ["type", "billerType"]),
+          coverageCity: String(row.coverageCity ?? ""),
+          coverageState: String(row.coverageState ?? ""),
+          coveragePincode:
+            row.coveragePincode === undefined || row.coveragePincode === null
+              ? undefined
+              : String(row.coveragePincode),
+          updatedDate: row.updatedDate ? String(row.updatedDate) : undefined,
+          billerStatus: this.pickString(row, ["billerStatus", "status"]) || "ACTIVE",
+          isAvailable: true,
+          iconUrl: this.pickString(row, ["iconUrl", "logoUrl", "imageUrl"]),
+        };
+      })
+      .filter((biller): biller is NonNullable<typeof biller> => Boolean(biller))
+      .filter((biller: any) => biller.billerStatus.toUpperCase() === "ACTIVE")
+      .sort((a: any, b: any) => a.billerName.localeCompare(b.billerName));
+  }
+
   private escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
@@ -877,10 +964,39 @@ export class BbpsService {
             parameter.isMandatory ??
             parameter.required ??
             0,
+          minLength:
+            parameter.minLength ??
+            parameter.min ??
+            parameter.minimumLength ??
+            parameter.minlength,
+          maxLength:
+            parameter.maxLength ??
+            parameter.max ??
+            parameter.maximumLength ??
+            parameter.maxlength,
           regex: parameter.regex ?? parameter.pattern ?? parameter.regEx,
         };
       })
       .filter(Boolean);
+  }
+
+  private cleanBillerDetails(details: {
+    billerId: string;
+    parameters?: Array<Record<string, unknown>>;
+    raw?: Record<string, any>;
+    syncedAt?: Date;
+  }) {
+    const raw = details.raw ?? {};
+    return {
+      billerId: details.billerId,
+      billerName: this.pickString(raw, ["billerName", "name", "biller"]) || undefined,
+      fetchRequirement: raw.fetchRequirement,
+      paymentModes: raw.paymentModes ?? raw.paymentMode,
+      deviceInfo: raw.deviceInfo ?? raw.initChannels,
+      parameters: details.parameters ?? [],
+      raw,
+      syncedAt: details.syncedAt,
+    };
   }
 
   private isMobileParameter(parameter: Record<string, unknown>) {
@@ -984,34 +1100,47 @@ export class BbpsService {
   }
 
   private normalizeBill(dto: FetchBillDto, bill: any, externalRef: string) {
+    const data = bill.data?.data ?? bill.data ?? bill;
+    const enquiryReferenceId = String(
+      data.enquiryReferenceId ??
+        data.enquiryRefId ??
+        data.refId ??
+        data.referenceId ??
+        data.externalRef ??
+        externalRef,
+    );
     const amount = Number(
-      bill.billAmount ??
-        bill.amount ??
-        bill.transactionAmount ??
-        bill.data?.billAmount ??
+      data.billAmount ??
+        data.amount ??
+        data.transactionAmount ??
+        data.bill?.amount ??
         0,
     );
     const consumerNumber = String(
-      bill.consumerNumber ??
-        bill.data?.consumerNumber ??
+      data.consumerNumber ??
+        data.customerParams?.consumerNumber ??
         Object.values(dto.inputParameters)[0] ??
         "",
     );
     return {
+      success: true,
       externalRef,
+      enquiryReferenceId,
       billerId: dto.billerId,
       categoryKey: dto.categoryKey,
       serviceCategory: dto.categoryName,
       operator: dto.billerName,
-      customerName: bill.customerName ?? bill.data?.customerName ?? "Customer",
+      customerName: data.customerName ?? data.customer?.name ?? "Customer",
       billAmount: amount,
       dueDate:
-        bill.dueDate ??
-        bill.data?.dueDate ??
+        data.dueDate ??
+        data.billDueDate ??
+        data.bill?.dueDate ??
         new Date(Date.now() + 86400000 * 7).toISOString(),
-      billNumber: bill.billNumber ?? bill.data?.billNumber ?? externalRef,
+      billNumber: data.billNumber ?? data.billNo ?? data.bill?.number ?? externalRef,
       consumerNumber,
       inputParameters: dto.inputParameters,
+      raw: bill,
     };
   }
 

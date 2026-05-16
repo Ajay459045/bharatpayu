@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "nest start --watch",
     "build": "nest build",
+    "prestart": "node scripts/ensure-build.js",
     "start": "node dist/main.js",
     "seed:admins": "node scripts/seed-admins.js",
     "lint": "eslint \"src/**/*.ts\"",

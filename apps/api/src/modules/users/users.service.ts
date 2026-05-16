@@ -27,6 +27,10 @@ export class UsersService {
     return this.userModel.findById(userId).lean();
   }
 
+  findDocumentById(userId: string) {
+    return this.userModel.findById(userId);
+  }
+
   async upsertOtpUser(mobile: string) {
     return this.userModel.findOneAndUpdate(
       { mobile },

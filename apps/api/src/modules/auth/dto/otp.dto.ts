@@ -1,4 +1,12 @@
-import { IsEmail, IsIn, IsObject, IsOptional, IsString, Matches, MinLength } from "class-validator";
+import {
+  IsEmail,
+  IsIn,
+  IsObject,
+  IsOptional,
+  IsString,
+  Matches,
+  MinLength,
+} from "class-validator";
 
 export class VerifyOtpDto {
   @Matches(/^[6-9]\d{9}$/)
@@ -41,6 +49,40 @@ export class VerifyEmailOtpDto {
   device?: Record<string, unknown>;
 }
 
+export class ForgotPasswordDto {
+  @IsEmail()
+  email!: string;
+}
+
+export class ResetPasswordDto {
+  @IsEmail()
+  email!: string;
+
+  @IsString()
+  otp!: string;
+
+  @IsOptional()
+  @IsString()
+  challengeId?: string;
+
+  @MinLength(8)
+  password!: string;
+
+  @MinLength(8)
+  confirmPassword!: string;
+}
+
+export class ChangePasswordDto {
+  @MinLength(8)
+  currentPassword!: string;
+
+  @MinLength(8)
+  newPassword!: string;
+
+  @MinLength(8)
+  confirmPassword!: string;
+}
+
 export class RegisterDto {
   @IsIn(["retailer", "distributor"])
   role!: "retailer" | "distributor";
@@ -76,8 +118,18 @@ export class RegisterDto {
   pincode!: string;
 
   @IsObject()
-  documents!: { panImage: string; aadhaarFront: string; aadhaarBack: string; selfie: string };
+  documents!: {
+    panImage: string;
+    aadhaarFront: string;
+    aadhaarBack: string;
+    selfie: string;
+  };
 
   @IsObject()
-  location!: { latitude: number; longitude: number; ipAddress?: string; deviceInfo: Record<string, unknown> };
+  location!: {
+    latitude: number;
+    longitude: number;
+    ipAddress?: string;
+    deviceInfo: Record<string, unknown>;
+  };
 }

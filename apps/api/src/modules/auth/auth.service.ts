@@ -17,7 +17,11 @@ import { SecuritySetting } from "../admin/schemas/security-setting.schema";
 import { BbpsService } from "../bbps/bbps.service";
 import { NotificationService } from "../notification/notification.service";
 import { UsersService } from "../users/users.service";
-import { RegisterDto } from "./dto/otp.dto";
+import {
+  ChangePasswordDto,
+  RegisterDto,
+  ResetPasswordDto,
+} from "./dto/otp.dto";
 import { Device } from "./schemas/device.schema";
 import { OtpLog } from "./schemas/otp-log.schema";
 import { Session } from "./schemas/session.schema";
@@ -176,6 +180,85 @@ export class AuthService {
     return this.createSession(user, device, request);
   }
 
+  async forgotPassword(email: string) {
+    const user = await this.users.findByEmail(email);
+    if (!user) {
+      return {
+        message: "If the email exists, a password reset OTP has been sent.",
+      };
+    }
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const challengeId = nanoid(24);
+    await this.otpModel.create({
+      userId: new Types.ObjectId(String(user._id)),
+      email: user.email.toLowerCase(),
+      otp: await bcrypt.hash(otp, 12),
+      type: "password_reset",
+      challengeId,
+      expiresAt: new Date(Date.now() + 1000 * 60 * 10),
+      lastSentAt: new Date(),
+    });
+    const emailSent = await this.sendEmailOtp(
+      user.email,
+      otp,
+      "password_reset",
+    );
+    await this.notifications.enqueue("email.password_reset.otp", {
+      userId: String(user._id),
+      email: user.email,
+      otp,
+      channels: ["email"],
+    });
+    return {
+      challengeId,
+      message: emailSent
+        ? "Password reset OTP sent"
+        : "SMTP is not configured. Use testing OTP shown on screen.",
+      devOtp:
+        emailSent || this.config.get<string>("NODE_ENV") === "production"
+          ? undefined
+          : otp,
+    };
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    if (dto.password !== dto.confirmPassword) {
+      throw new BadRequestException("Passwords do not match");
+    }
+    const user = await this.users.findByEmail(dto.email);
+    if (!user) throw new UnauthorizedException("Invalid or expired OTP");
+    await this.verifyOtpCode(
+      dto.email,
+      dto.otp,
+      "password_reset",
+      dto.challengeId,
+    );
+    user.passwordHash = await bcrypt.hash(dto.password, 12);
+    await user.save();
+    await this.sessionModel.updateMany(
+      { userId: new Types.ObjectId(String(user._id)) },
+      { revokedAt: new Date() },
+    );
+    return { message: "Password reset successfully. Please login again." };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException("Passwords do not match");
+    }
+    const account = await this.users.findDocumentById(userId);
+    if (!account) throw new UnauthorizedException("Invalid session");
+    if (
+      !account.passwordHash ||
+      !(await bcrypt.compare(dto.currentPassword, account.passwordHash))
+    ) {
+      throw new UnauthorizedException("Current password is incorrect");
+    }
+    account.passwordHash = await bcrypt.hash(dto.newPassword, 12);
+    await account.save();
+    return { message: "Password changed successfully." };
+  }
+
   private async createSession(
     user: any,
     device: Record<string, unknown> | undefined,
@@ -275,13 +358,13 @@ export class AuthService {
   private async sendEmailOtp(
     email: string,
     otp: string,
-    type: "registration" | "login",
+    type: "registration" | "login" | "password_reset",
   ) {
     const host = this.config.get<string>("SMTP_HOST");
     const user = this.config.get<string>("SMTP_USER");
     const pass = this.config.get<string>("SMTP_PASS");
     if (!host || !user || !pass || user === "replace" || pass === "replace")
-      return;
+      return false;
 
     const transporter = nodemailer.createTransport({
       host,
@@ -302,13 +385,16 @@ export class AuthService {
     const subject =
       type === "registration"
         ? "Verify your BharatPayU registration"
-        : "BharatPayU login OTP";
-    await transporter.sendMail({
-      from: this.config.get<string>("SMTP_FROM", `BharatPayU <${user}>`),
-      to: email,
-      subject,
-      text: `Your BharatPayU ${type} OTP is ${otp}. It expires in 10 minutes.`,
-      html: `
+        : type === "password_reset"
+          ? "Reset your BharatPayU password"
+          : "BharatPayU login OTP";
+    try {
+      await transporter.sendMail({
+        from: this.config.get<string>("SMTP_FROM", `BharatPayU <${user}>`),
+        to: email,
+        subject,
+        text: `Your BharatPayU ${type} OTP is ${otp}. It expires in 10 minutes.`,
+        html: `
         <div style="font-family:Inter,Arial,sans-serif;background:#03091f;color:#f8fafc;padding:28px">
           <div style="max-width:520px;margin:auto;background:#071238;border:1px solid #1d4ed8;border-radius:12px;padding:28px">
             <h2 style="margin:0 0 12px;color:#ffffff">BharatPayU Verification</h2>
@@ -318,13 +404,17 @@ export class AuthService {
           </div>
         </div>
       `,
-    });
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async verifyOtpCode(
     email: string,
     otp: string,
-    type: "registration" | "login",
+    type: "registration" | "login" | "password_reset",
     challengeId?: string,
   ) {
     const query: Record<string, unknown> = {

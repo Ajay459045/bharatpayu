@@ -20,7 +20,11 @@ export class OtpLog {
   @Prop({ default: false, index: true })
   verified!: boolean;
 
-  @Prop({ enum: ["registration", "login"], required: true, index: true })
+  @Prop({
+    enum: ["registration", "login", "password_reset"],
+    required: true,
+    index: true,
+  })
   type!: string;
 
   @Prop()

@@ -3,8 +3,8 @@ services:
     name: bharatpayu-api
     runtime: node
     plan: free
-    buildCommand: npm ci --include=dev && npm run build --workspace @bharatpayu/api && test -f apps/api/dist/main.js
-    startCommand: npm run start --workspace @bharatpayu/api
+    buildCommand: npm install --include=dev && (npm run build --workspace @bharatpayu/api || npm run build) && (test -f apps/api/dist/main.js || test -f dist/main.js)
+    startCommand: if [ -f apps/api/dist/main.js ]; then npm run start --workspace @bharatpayu/api; else npm start; fi
     envVars:
       - key: NODE_VERSION
         value: 22
